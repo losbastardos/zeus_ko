@@ -16,7 +16,7 @@ LDFLAGS_BIN ?= -Wl,--dynamic-linker=$(DYN_LINKER)
 
 NASMFLAGS   = -f elf64 -I $(SRCDIR)/
 
-.PHONY: all clean run sdl test
+.PHONY: all clean run test
 
 all: $(TARGET)
 
@@ -28,12 +28,10 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc
 	nasm $(NASMFLAGS) $< -o $@
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) chess-sdl
+	rm -rf $(OBJDIR) $(TARGET)
 
 run: $(TARGET)
 	./$(TARGET)
-
-sdl: $(TARGET)
 
 test: $(TARGET)
 	bash tests/regression.sh
