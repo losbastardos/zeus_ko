@@ -1,0 +1,14 @@
+# build artefakty
+obj/
+*.o
+chess
+chess-sdl
+
+# historické verzie súborov (.history plugin)
+.history/
+
+# dáta / knižnice / venv
+book.book
+games.pgn
+utils/*.pgn
+utils/.venv/
