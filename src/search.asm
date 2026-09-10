@@ -46,13 +46,33 @@ extern compute_hash
 extern tt_probe, tt_store, position_hash
 extern check_repetition
 extern hash_history, hash_count
+extern tb_piece_count, tb_probe_wdl
+extern search_poll_input
 
 ; ============================================================
 ; check_time - periodicka kontrola timeoutu pre UCI search
 ; Vystup: eax = 1 ak treba zastavit, inak 0
+; Pozor: volajuce negamax/quiescence maju v rdi/rsi/rdx/rcx argumenty
+; (ukladaju ich az po call), preto su tu okrem rbx ulozene aj tie.
 ; ============================================================
 check_time:
     push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    cmp byte [uci_stop_flag], 0
+    je .poll_input
+    mov eax, 1
+    jmp .ret
+
+.poll_input:
+    ; neblokujuce spracovanie stdin (stop/ponderhit/isready/quit)
+    ; len kazdych 1024 nodov; aj v mode 3/4, inak by stop nikdy neprisiel
+    mov rax, [nodes_searched]
+    and rax, 1023
+    jnz .check_mode
+    call search_poll_input
     cmp byte [uci_stop_flag], 0
     je .check_mode
     mov eax, 1
@@ -100,6 +120,10 @@ check_time:
     xor eax, eax
 
 .ret:
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
     pop rbx
     ret
 
@@ -574,6 +598,30 @@ negamax:
     xor eax, eax
     jmp .neg_exit
 .no_draw:
+
+    ; --- SYZYGY TB PROBE (stub) ---
+    ; ak je na sachovnici <= 7 kamenov, skus WDL probe
+    ; zname skore vratime okamzite; TB_NOT_FOUND = normalny search
+    ; (pouzivame len caller-saved registre, nic nie je live)
+    call tb_piece_count
+    cmp eax, 7
+    jg .tb_skip
+    call tb_probe_wdl
+    cmp eax, TB_NOT_FOUND
+    je .tb_skip
+    cmp eax, TB_WIN
+    je .tb_win
+    cmp eax, TB_LOSS
+    je .tb_loss
+    xor eax, eax            ; TB_DRAW -> 0
+    jmp .neg_exit
+.tb_win:
+    mov eax, 20000
+    jmp .neg_exit
+.tb_loss:
+    mov eax, -20000
+    jmp .neg_exit
+.tb_skip:
 
     ; uloz povodne alpha pre urcenie TT flagu
     mov rax, [rbp - 16]

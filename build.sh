@@ -34,4 +34,4 @@ fi
 
 make clean || true
 make all
-echo "Build OK: ./chess (text + gfx: framebuffer/SDL)"
+echo "Build OK: ./chess (text + gfx: framebuffer/SDL) + ./chess-static (text-only, static)"

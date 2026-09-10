@@ -67,6 +67,10 @@ menu_unavailable_en_len equ $ - menu_unavailable_en
 menu_nl:
     db 10
 
+; argument cmdline pre priamy UCI rezim (./chess --uci)
+uci_arg_str:
+    db "--uci", 0
+
 strength_title:
     db 27,"[96mSelect Computer Strength:",27,"[0m",10
     db "  ",27,"[33m1",27,"[0m"," - Beginner ",27,"[90m(ELO 800)",27,"[0m",10
@@ -858,6 +862,24 @@ select_game_mode:
 ; Hlavny vstup programu
 ; ============================================================
 _start:
+    ; argv: ak argv[1] == "--uci", nastav uci_requested este pred inicializaciou
+    ; ([rsp]=argc, [rsp+16]=argv[1]; RSP je tu 16B zarovnany, bez callov)
+    cmp qword [rsp], 2
+    jl .no_uci_arg
+    mov rsi, [rsp+16]
+    lea rdi, [uci_arg_str]
+    xor rcx, rcx
+.uci_arg_cmp:
+    mov al, [rdi+rcx]
+    cmp al, [rsi+rcx]
+    jne .no_uci_arg
+    test al, al
+    jz .uci_arg_hit
+    inc rcx
+    jmp .uci_arg_cmp
+.uci_arg_hit:
+    mov byte [uci_requested], 1
+.no_uci_arg:
     call init_board
     call init_hash_history
     call record_hash
@@ -919,6 +941,8 @@ _start:
     test rax, rax
     setnz byte [debug]
 
+    cmp byte [uci_requested], 0
+    jne .do_uci             ; --uci na cmdline: menu sa preskoci
     call select_game_mode
     cmp byte [uci_requested], 0
     jne .do_uci

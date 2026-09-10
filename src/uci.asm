@@ -10,8 +10,10 @@ section .data
 
 global uci_id_name, uci_id_author, uci_ok, uci_ready, uci_bestmove, uci_unknown
 
+%defstr BUILD_DATE_STR BUILD_DATE
+
 uci_id_name:
-    db "id name SachovyEngine", 10, 0
+    db "id name Zeus_KO ", BUILD_DATE_STR, 10, 0
 uci_id_name_len equ $ - uci_id_name - 1
 
 uci_id_author:
@@ -34,17 +36,35 @@ uci_unknown:
     db "info string neznamy prikaz", 10, 0
 uci_unknown_len equ $ - uci_unknown - 1
 
+uci_log_name:      db "uci_debug.log", 0
+uci_log_prefix_in: db ">> "
+uci_log_bm_prefix: db "<< bestmove "
+uci_log_bm_prefix_len equ $ - uci_log_bm_prefix
+uci_log_bm_null:   db "<< bestmove 0000", 10
+uci_log_bm_null_len equ $ - uci_log_bm_null
+uci_str_0000:      db "0000"
 
+section .data
+uci_log_fd: dq -2                      ; -2 = neotvorene, -1 = zlyhalo (bez retry)
 
 section .bss
 uci_next_idx: resq 1      ; index dalsieho tokenu (generate_all_moves nicí r12)
 fen_buf:      resb 128    ; buffer pre FEN reťazec
 uci_timespec: resq 2
 pv_char_buf:  resb 1
+uci_log_move_buf: resb 8 ; "e2e4" / "e7e8q" pre log
+input_pend:     resb 512  ; nevybavený vstup z pollu počas searchu (oddelený od move_buf!)
+input_pend_len: resq 1
+uci_quit_flag:  resb 1    ; 'quit' prišlo počas searchu -> exit hneď po bestmove
+input_pollfd:   resd 2    ; pollfd: dd fd, dw events, dw revents
+uci_iter_start: resq 1    ; mode 2: start aktuálnej ID iterácie (ms)
+uci_iter_dur:   resq 1    ; mode 2: trvanie poslednej dokončenej iterácie (ms)
+
+INPUT_PEND_SIZE equ 512
 
 section .text
 
-global uci_loop, write_cstr
+global uci_loop, write_cstr, search_poll_input
 
 extern init_board, init_hash_history, record_hash, clear_history
 extern generate_all_moves, find_move, apply_move, update_position_state, compute_hash
@@ -59,6 +79,7 @@ extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
+extern tb_init, tb_path, tb_path_len
 
 ; ============================================================
 ; write_str - vypise C-string na stdout
@@ -90,6 +111,48 @@ write_cstr:
     mov rdx, rcx
     call write_str
     pop rcx
+    pop rbx
+    ret
+
+; ============================================================
+; uci_log_str - zapise retazec do uci_debug.log (best-effort)
+; Vstup: rdi = ptr, rsi = len. Vsetky chyby ticho ignorovane.
+; Lazy open v cwd pri prvom volani; fd=-1 -> nikdy viac neotvarame.
+; ============================================================
+uci_log_str:
+    push rbx
+    push r12
+    push r13
+    mov r12, rdi              ; ptr
+    mov r13, rsi              ; len
+    mov rbx, [uci_log_fd]
+    cmp rbx, -2
+    jne .have_fd
+    mov rax, SYS_OPEN
+    lea rdi, [uci_log_name]
+    mov esi, O_WRONLY | O_CREAT | O_APPEND
+    mov edx, 420              ; 0644
+    syscall
+    test rax, rax
+    js .open_failed
+    mov rbx, rax
+    mov [uci_log_fd], rax
+    jmp .write
+.open_failed:
+    mov qword [uci_log_fd], -1
+    jmp .done
+.have_fd:
+    cmp rbx, -1
+    je .done
+.write:
+    mov rax, SYS_WRITE
+    mov rdi, rbx
+    mov rsi, r12
+    mov rdx, r13
+    syscall
+.done:
+    pop r13
+    pop r12
     pop rbx
     ret
 
@@ -562,6 +625,13 @@ uci_setoption:
     test rax, rax
     jnz .opt_ponder
 
+    mov rdi, r13
+    mov rsi, r14
+    lea rdx, [rel .str_syzygypath]
+    call uci_str_eq
+    test rax, rax
+    jnz .opt_syzygypath
+
     jmp .done
 
 .opt_hash:
@@ -617,6 +687,32 @@ uci_setoption:
     test rax, rax
     jz .done
     mov byte [uci_ponder], 0
+    jmp .done
+
+.opt_syzygypath:
+    ; r15 = start hodnoty, rbx = dlzka hodnoty
+    test rbx, rbx
+    jz .done                ; chybajuca/prazdna hodnota - ignoruj
+    cmp rbx, 255
+    jbe .tb_len_ok
+    mov rbx, 255            ; bezpecna truncat na max 255 znakov
+.tb_len_ok:
+    lea rsi, [move_buf]
+    add rsi, r15            ; zdroj: token v move_buf
+    lea rdi, [tb_path]      ; ciel: interny buffer tb.asm
+    xor ecx, ecx
+.tb_copy:
+    cmp rcx, rbx
+    jae .tb_term
+    movzx eax, byte [rsi + rcx]
+    mov [rdi + rcx], al
+    inc rcx
+    jmp .tb_copy
+.tb_term:
+    mov byte [rdi + rcx], 0
+    mov [tb_path_len], rcx
+    call tb_init            ; rdi uz ukazuje na ulozenu cestu
+    jmp .done
 
 .done:
     pop r15
@@ -629,6 +725,7 @@ uci_setoption:
 .str_hash:     db "Hash", 0
 .str_ownbook:  db "OwnBook", 0
 .str_ponder:   db "Ponder", 0
+.str_syzygypath: db "SyzygyPath", 0
 .str_true:     db "true", 0
 .str_false:    db "false", 0
 
@@ -683,6 +780,190 @@ uci_now_ms:
 .done:
     pop rdx
     pop rcx
+    pop rbx
+    ret
+
+; ============================================================
+; uci_alloc_time - casovy budget pre mode 2 (time/movestogo + inc, min 50ms)
+; Pouziva cas strany na tahu z search_limits; vysledok do +56/+64.
+; Volaju uci_go (mode 2) aj search_poll_input (ponderhit).
+; ============================================================
+uci_alloc_time:
+    movzx ecx, byte [side]
+    test ecx, ecx
+    jz .alloc_white
+    mov rax, [search_limits + 24]       ; btime
+    mov rcx, [search_limits + 40]       ; binc
+    jmp .alloc_common
+.alloc_white:
+    mov rax, [search_limits + 16]       ; wtime
+    mov rcx, [search_limits + 32]       ; winc
+.alloc_common:
+    movzx edx, byte [search_limits + 2] ; movestogo
+    test edx, edx
+    jnz .have_mtg
+    mov edx, 30
+.have_mtg:
+    mov r8d, edx
+    xor rdx, rdx
+    div r8
+    add rax, rcx
+    test rax, rax
+    jnz .alloc_store
+    mov rax, 50
+.alloc_store:
+    mov [search_limits + 56], rax        ; soft = base
+    mov rcx, rax
+    shr rcx, 1                           ; base/2 rezerva na dobehnutie iteracie
+    add rcx, rax
+    mov [search_limits + 64], rcx        ; hard = base + base/2
+    ret
+
+; ============================================================
+; search_poll_input - neblokujuce spracovanie UCI vstupu pocas searchu
+; Volane z check_time (search.asm) len kazdych 1024 nodov.
+; Obsluzi: stop, ponderhit (len v mode 4), isready, quit.
+; Registre: nici caller-saved + rbx/r12/r13 (tie su ulozene).
+; ============================================================
+search_poll_input:
+    push rbx
+    push r12
+    push r13
+
+    ; a) poll(fd 0, timeout 0): je na stdin pripraveny bajt?
+    mov dword [input_pollfd], 0         ; fd = STDIN
+    mov word [input_pollfd + 4], POLLIN
+    mov word [input_pollfd + 6], 0
+    mov rax, SYS_POLL
+    lea rdi, [input_pollfd]
+    mov esi, 1                          ; nfds
+    xor edx, edx                        ; timeout 0
+    syscall
+    test rax, rax
+    jle .done
+    test word [input_pollfd + 6], POLLIN
+    jz .done
+
+    ; b) nacitaj volne bajty do input_pend
+    mov rdx, INPUT_PEND_SIZE
+    sub rdx, [input_pend_len]
+    jz .done                            ; buffer plny
+    mov rax, SYS_READ
+    xor edi, edi
+    lea rsi, [input_pend]
+    add rsi, [input_pend_len]
+    syscall
+    test rax, rax
+    jle .done
+    add [input_pend_len], rax
+
+    ; c)-e) spracuj vsetky cele riadky v bufferi
+.line_loop:
+    mov r12, [input_pend_len]
+    lea rbx, [input_pend]
+    xor ecx, ecx
+.find_nl:
+    cmp rcx, r12
+    jae .done                           ; ziadny cely riadok - koncime
+    cmp byte [rbx + rcx], 10
+    je .have_line
+    inc rcx
+    jmp .find_nl
+.have_line:
+    mov r13, rcx                        ; index newlineu = raw dlzka riadku
+
+    ; odstran trailing '\r' (CRLF protokol)
+    test r13, r13
+    jz .dispatch
+    cmp byte [rbx + r13 - 1], 13
+    jne .dispatch
+    dec r13
+.dispatch:
+    ; case-sensitive porovnanie prikazov
+    cmp r13, 4
+    jne .try_isready
+    mov eax, dword [rbx]
+    cmp eax, 'stop'
+    je .cmd_stop
+    cmp eax, 'quit'
+    je .cmd_quit
+    jmp .next_line
+.try_isready:
+    cmp r13, 7
+    jne .try_ponderhit
+    cmp dword [rbx], 'isre'
+    jne .next_line
+    cmp dword [rbx + 3], 'eady'
+    jne .next_line
+    jmp .cmd_isready
+.try_ponderhit:
+    cmp r13, 9
+    jne .next_line
+    cmp dword [rbx], 'pond'
+    jne .next_line
+    cmp dword [rbx + 4], 'erhi'
+    jne .next_line
+    cmp byte [rbx + 8], 't'
+    jne .next_line
+
+    ; --- ponderhit: len v ponder mode prepne na casovany budget ---
+    cmp byte [search_limits + 0], 4
+    jne .next_line
+    mov byte [search_limits + 0], 2
+    mov byte [uci_ponder], 0
+    call uci_alloc_time
+    call uci_now_ms
+    mov [search_limits + 48], rax       ; budget odpocitavany od momentu ponderhitu
+    jmp .next_line
+
+.cmd_isready:
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [uci_ready]                ; "readyok\n"
+    mov edx, 8
+    syscall
+    jmp .next_line
+
+.cmd_stop:
+    mov byte [uci_stop_flag], 1
+    jmp .next_line
+
+.cmd_quit:
+    mov byte [uci_quit_flag], 1
+    ; v infinite/ponder mode musi quit zastavit aj search (inak by visel naveky)
+    cmp byte [search_limits + 0], 3
+    je .quit_stop
+    cmp byte [search_limits + 0], 4
+    je .quit_stop
+    jmp .next_line
+.quit_stop:
+    mov byte [uci_stop_flag], 1
+    jmp .next_line
+
+.next_line:
+    ; vyhod riadok z input_pend (r13+1 bajtov z lava)
+    mov rax, r12
+    sub rax, r13
+    dec rax                             ; nova dlzka = len - nl - 1
+    xor ecx, ecx
+    lea rsi, [rbx + r13 + 1]            ; zdroj za newlineom
+.shift:
+    cmp rcx, rax
+    jae .shift_done
+    mov dl, [rsi + rcx]
+    mov [rbx + rcx], dl
+    inc rcx
+    jmp .shift
+.shift_done:
+    mov [input_pend_len], rax
+    ; po 'stop' zvysne prikazy nechame na uci_loop (bestmove pride skor)
+    cmp byte [uci_stop_flag], 0
+    jne .done
+    jmp .line_loop
+
+.done:
+    pop r13
+    pop r12
     pop rbx
     ret
 
@@ -836,11 +1117,11 @@ uci_go:
     push r14
     push r15
 
-    ; reset limitov
+    ; reset limitov (cisty stav - ziadny sticky mode/times z predchadzajuceho go)
     mov byte [search_limits + 0], 0      ; mode: fixed depth
     movzx rax, byte [search_depth]
     mov byte [search_limits + 1], al     ; default depth
-    mov byte [search_limits + 2], 30     ; movestogo fallback
+    mov byte [search_limits + 2], 0      ; movestogo 0 = fallback 30 v alloc
     xor rax, rax
     mov qword [search_limits + 8], rax
     mov qword [search_limits + 16], rax
@@ -851,6 +1132,7 @@ uci_go:
     mov qword [search_limits + 56], rax
     mov qword [search_limits + 64], rax
     mov byte [uci_stop_flag], 0
+    mov byte [uci_quit_flag], 0
 
     ; parsuj argumenty za 'go'
     mov rdi, 2
@@ -1065,33 +1347,7 @@ uci_go:
     movzx eax, byte [search_limits + 0]
     cmp eax, 2
     jne .time_start
-
-    movzx ecx, byte [side]
-    test ecx, ecx
-    jz .alloc_white
-    mov rax, [search_limits + 24]       ; btime
-    mov rcx, [search_limits + 40]       ; binc
-    jmp .alloc_common
-.alloc_white:
-    mov rax, [search_limits + 16]       ; wtime
-    mov rcx, [search_limits + 32]       ; winc
-.alloc_common:
-    movzx edx, byte [search_limits + 2] ; movestogo
-    test edx, edx
-    jnz .have_mtg
-    mov edx, 30
-.have_mtg:
-    xor r8, r8
-    mov r8d, edx
-    xor rdx, rdx
-    div r8
-    add rax, rcx
-    test rax, rax
-    jnz .alloc_store
-    mov rax, 50
-.alloc_store:
-    mov [search_limits + 56], rax
-    mov [search_limits + 64], rax
+    call uci_alloc_time
 
 .time_start:
     call uci_now_ms
@@ -1107,6 +1363,7 @@ uci_go:
     xor r13d, r13d            ; best_move
     xor r14d, r14d            ; best_depth
     mov r15, 1                ; current depth
+    mov qword [uci_iter_dur], 0
 
 .id_loop:
     cmp byte [uci_stop_flag], 0
@@ -1114,6 +1371,25 @@ uci_go:
 
     cmp r15, r12
     jg .id_done
+
+    ; --- mode 2: soft/hard casove brany pred startom iteracie ---
+    ; soft: ak uz minul soft limit, dalsiu iteraciu nezacname
+    ; hard: nezacname iteraciu, ktora by s rezervou 2x posledna
+    ;       iteracia (typicky rastie 2-2.5x na hlbku) precfuje hard limit
+    cmp byte [search_limits + 0], 2
+    jne .timegates_ok
+    call uci_now_ms
+    sub rax, [search_limits + 48]        ; elapsed
+    cmp rax, [search_limits + 56]        ; > soft -> koncime
+    jg .id_done
+    mov rcx, [uci_iter_dur]
+    add rcx, rcx
+    add rcx, rax
+    cmp rcx, [search_limits + 64]        ; elapsed + 2*dur > hard -> koncime
+    jg .id_done
+.timegates_ok:
+    call uci_now_ms
+    mov [uci_iter_start], rax
 
     ; --- ASPIRATION WINDOW: pre depth >= 5 okolo predch. skore ---
     mov dword [asp_use], 0
@@ -1183,6 +1459,11 @@ uci_go:
     mov r13, rax
     mov r14, r15
 
+    ; trvanie iteracie (vratane aspiration retry) pre hard gate
+    call uci_now_ms
+    sub rax, [uci_iter_start]
+    mov [uci_iter_dur], rax
+
     call uci_now_ms
     sub rax, [search_limits + 48]
     mov rdi, r15
@@ -1213,9 +1494,60 @@ uci_go:
 .do_move:
     mov r12, rax
 
+    ; --- log "<< bestmove <tah>" (0000 ak nulty tah) ---
+    test r12, r12
+    jz .log_bm_null
+    mov rax, r12
+    and rax, 0x3F
+    call square_to_str
+    mov ax, [square_str_buf]
+    mov [uci_log_move_buf], ax
+    mov rax, r12
+    shr rax, 6
+    and rax, 0x3F
+    call square_to_str
+    mov ax, [square_str_buf]
+    mov [uci_log_move_buf + 2], ax
+    mov r13d, 4                 ; r13 uz je mrtvy (best move je v r12)
+    mov rax, r12
+    shr rax, 12
+    cmp rax, FLAG_PROMO_Q
+    jb .log_bm_go
+    cmp rax, FLAG_PROMO_N
+    ja .log_bm_go
+    lea rdx, [pv_promo_chars]
+    movzx edx, byte [rdx + rax - 1]
+    mov [uci_log_move_buf + 4], dl
+    mov r13d, 5
+.log_bm_go:
+    lea rdi, [uci_log_bm_prefix]
+    mov esi, uci_log_bm_prefix_len
+    call uci_log_str
+    lea rdi, [uci_log_move_buf]
+    mov esi, r13d
+    call uci_log_str
+    lea rdi, [msg_newline]
+    mov esi, 1
+    call uci_log_str
+    jmp .log_bm_done
+.log_bm_null:
+    lea rdi, [uci_log_bm_null]
+    mov esi, uci_log_bm_null_len
+    call uci_log_str
+.log_bm_done:
+
     lea rdi, [uci_bestmove]
     mov rdx, uci_bestmove_len
     call write_str
+
+    ; nulty tah (mat/pat): UCI konvencia "bestmove 0000"
+    test r12, r12
+    jnz .bm_have_move
+    lea rdi, [uci_str_0000]
+    mov rdx, 4
+    call write_str
+    jmp .bm_no_promo
+.bm_have_move:
 
     mov rax, r12
     and rax, 0x3F
@@ -1261,6 +1593,14 @@ uci_go:
 
     mov byte [uci_ponder], 0
 
+    ; ak prislo 'quit' pocas searchu, proces konci hned po bestmove
+    cmp byte [uci_quit_flag], 0
+    je .no_quit_exit
+    mov rax, SYS_EXIT
+    xor edi, edi
+    syscall
+.no_quit_exit:
+
     pop r15
     pop r14
     pop r13
@@ -1297,6 +1637,48 @@ uci_parse_int:
     ret
 
 ; ============================================================
+; input_read_byte - precita jeden bajt stdin (najprv z input_pend)
+; Vystup: al = bajt, rax = -1 ak EOF
+; Nici len caller-saved registre (rax, rcx, rdx, rsi, r11)
+; ============================================================
+input_read_byte:
+    mov rax, [input_pend_len]
+    test rax, rax
+    jz .from_stdin
+
+    ; vyber prvy bajt z input_pend a zvysok posun do lava
+    lea rsi, [input_pend]
+    movzx r11d, byte [rsi]
+    mov rcx, 1
+.shift:
+    cmp rcx, rax
+    jae .shift_done
+    mov dl, [rsi + rcx]
+    mov [rsi + rcx - 1], dl
+    inc rcx
+    jmp .shift
+.shift_done:
+    dec rax
+    mov [input_pend_len], rax
+    movzx eax, r11b
+    ret
+
+.from_stdin:
+    mov rax, SYS_READ
+    xor edi, edi
+    lea rsi, [input_pend]        ; buffer je prazdny, citame rovno do neho
+    mov edx, 1
+    syscall
+    cmp rax, 1
+    jne .eof
+    movzx eax, byte [input_pend]
+    ret
+
+.eof:
+    mov rax, -1
+    ret
+
+; ============================================================
 ; uci_read_line - nacita jeden riadok do move_buf
 ; Vystup: rax = dlzka riadku (bez newline), -1 ak EOF
 ; ============================================================
@@ -1306,31 +1688,21 @@ uci_read_line:
     xor r12, r12
 
 .read_loop:
-    mov rax, SYS_READ
-    mov rdi, STDIN
-    lea rsi, [move_buf + r12]
-    mov rdx, 1
-    syscall
-    cmp rax, 1
-    jne .eof
-
-    movzx rbx, byte [move_buf + r12]
-    cmp rbx, 10
+    call input_read_byte
+    cmp rax, -1
+    je .eof
+    mov [move_buf + r12], al
+    cmp al, 10
     je .done
     inc r12
     cmp r12, 4095
     jl .read_loop
 
 .consume:
-    mov rax, SYS_READ
-    mov rdi, STDIN
-    lea rsi, [move_buf + 4095]
-    mov rdx, 1
-    syscall
-    cmp rax, 1
-    jne .done
-    movzx rbx, byte [move_buf + 4095]
-    cmp rbx, 10
+    call input_read_byte
+    cmp rax, -1
+    je .done
+    cmp al, 10
     je .done
     jmp .consume
 
@@ -1359,6 +1731,17 @@ uci_loop:
     call uci_read_line
     cmp rax, -1
     je .done
+
+    ; log prijateho riadku: ">> <riadok>"
+    lea rdi, [uci_log_prefix_in]
+    mov esi, 3
+    call uci_log_str
+    lea rdi, [move_buf]
+    mov rsi, [move_buf_len]
+    call uci_log_str
+    lea rdi, [msg_newline]
+    mov esi, 1
+    call uci_log_str
 
     ; prazdny riadok
     mov r12, [move_buf_len]
