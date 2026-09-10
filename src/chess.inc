@@ -5,6 +5,7 @@
 ; Systemove konstanty
 SYS_READ    equ 0
 SYS_WRITE   equ 1
+SYS_POLL    equ 7
 SYS_CLOCK_GETTIME equ 228
 SYS_EXIT    equ 60
 SYS_OPEN    equ 2
@@ -14,6 +15,9 @@ STDOUT      equ 1
 
 CLOCK_REALTIME   equ 0
 CLOCK_MONOTONIC  equ 1
+
+; poll() event mask
+POLLIN      equ 1
 
 ; open() flags
 O_WRONLY    equ 1
@@ -61,3 +65,9 @@ MATE_SCORE  equ 50000
 TT_EXACT    equ 0
 TT_LOWER    equ 1
 TT_UPPER    equ 2
+
+; Syzygy tablebase vysledky (stub, ziadne zaporne hodnoty)
+TB_LOSS      equ 0
+TB_DRAW      equ 1
+TB_WIN       equ 2
+TB_NOT_FOUND equ 255

@@ -3,6 +3,7 @@ obj/
 *.o
 chess
 chess-sdl
+chess-static
 
 # historické verzie súborov (.history plugin)
 .history/
@@ -12,3 +13,5 @@ book.book
 games.pgn
 utils/*.pgn
 utils/.venv/
+uci_debug.log
+.xdp-*
