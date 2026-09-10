@@ -37,6 +37,10 @@ uci_unknown:
 uci_unknown_len equ $ - uci_unknown - 1
 
 uci_log_name:      db "uci_debug.log", 0
+uci_log_start:     db "=== Zeus_KO ", BUILD_DATE_STR, " start ===", 10
+uci_log_start_len  equ $ - uci_log_start
+uci_log_fail:      db "info string uci_debug.log: otvorenie zlyhalo (chyba prava zapisu?)", 10
+uci_log_fail_len   equ $ - uci_log_fail
 uci_log_prefix_in: db ">> "
 uci_log_bm_prefix: db "<< bestmove "
 uci_log_bm_prefix_len equ $ - uci_log_bm_prefix
@@ -140,6 +144,12 @@ uci_log_str:
     jmp .write
 .open_failed:
     mov qword [uci_log_fd], -1
+    ; jednorazovo viditelne oznamime do stdout (GUI Engine output)
+    mov eax, SYS_WRITE
+    mov edi, 1
+    lea rsi, [uci_log_fail]
+    mov edx, uci_log_fail_len
+    syscall
     jmp .done
 .have_fd:
     cmp rbx, -1
@@ -1726,6 +1736,10 @@ uci_read_line:
 uci_loop:
     push rbx
     push r12
+    ; startovaci marker do logu - diagnostika: bezi nova binarka + kde loguje
+    lea rdi, [uci_log_start]
+    mov esi, uci_log_start_len
+    call uci_log_str
 
 .loop:
     call uci_read_line
