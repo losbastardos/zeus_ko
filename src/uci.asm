@@ -60,6 +60,8 @@ uci_log_move_buf: resb 8 ; "e2e4" / "e7e8q" pre log
 input_pend:     resb 512  ; nevybavený vstup z pollu počas searchu (oddelený od move_buf!)
 input_pend_len: resq 1
 uci_quit_flag:  resb 1    ; 'quit' prišlo počas searchu -> exit hneď po bestmove
+uci_pgn_ply:    resq 1    ; počet ťahov zaznamenaných do PGN v aktuálnej partii
+uci_pgn_idx:    resq 1    ; index ťahu v práve spracúvanom 'position ... moves'
 input_pollfd:   resd 2    ; pollfd: dd fd, dw events, dw revents
 uci_iter_start: resq 1    ; mode 2: start aktuálnej ID iterácie (ms)
 uci_iter_dur:   resq 1    ; mode 2: trvanie poslednej dokončenej iterácie (ms)
@@ -71,6 +73,7 @@ section .text
 global uci_loop, write_cstr, search_poll_input
 
 extern init_board, init_hash_history, record_hash, clear_history
+extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit
 extern generate_all_moves, find_move, apply_move, update_position_state, compute_hash
 extern search_best_move, book_lookup, print_move, square_to_str, print_number
 extern tt_init
@@ -357,6 +360,28 @@ uci_apply_moves:
     mov rax, rdi
     mov [uci_next_idx], rax
 
+    ; --- PGN: spočítaj ťahy v tomto príkaze (GUI posiela celú históriu) ---
+    ; takeback / kratšia história -> uzavri PGN sekciu a zaznamenaj znovu
+    mov r12, rdi              ; cursor
+    xor r13, r13              ; počet tokenov (uci_token zachová r12-r15)
+.pgn_count_loop:
+    mov rdi, r12
+    call uci_token
+    cmp rax, -1
+    je .pgn_count_done
+    test rbx, rbx
+    jz .pgn_count_done
+    inc r13
+    mov r12, rcx
+    jmp .pgn_count_loop
+.pgn_count_done:
+    cmp r13, [uci_pgn_ply]
+    jae .pgn_no_reset
+    call pgn_new_game
+    mov qword [uci_pgn_ply], 0
+.pgn_no_reset:
+    mov qword [uci_pgn_idx], 0
+
 .move_loop:
     mov rdi, [uci_next_idx]
     call uci_token
@@ -402,10 +427,25 @@ uci_apply_moves:
     jz .done
 
 .apply:
+    ; PGN: zaznamenaj len nové ťahy (rax = nájdený ťah z move_list, s flags)
+    mov rcx, [uci_pgn_idx]
+    cmp rcx, [uci_pgn_ply]
+    jb .pgn_no_san
+    push rax
+    call pgn_san_begin      ; SAN jadro (move_list ešte obsahuje legálne ťahy)
+    pop rax
+.pgn_no_san:
     call apply_move
     call update_position_state
     call compute_hash
     call record_hash
+    mov rax, [uci_pgn_idx]
+    cmp rax, [uci_pgn_ply]
+    jb .pgn_skip
+    call pgn_write_move     ; append do games.pgn (real-time)
+    inc qword [uci_pgn_ply]
+.pgn_skip:
+    inc qword [uci_pgn_idx]
     jmp .move_loop
 
 .done:
@@ -1882,6 +1922,8 @@ uci_loop:
     call init_board
     call init_hash_history
     call record_hash
+    call pgn_new_game         ; uzavrie PGN sekciu predchádzajúcej partie
+    mov qword [uci_pgn_ply], 0
     jmp .loop
 
 .stop:
@@ -1893,6 +1935,7 @@ uci_loop:
     jmp .loop
 
 .done:
+    call pgn_quit             ; uzavrie partiu a zavrie games.pgn
     pop r12
     pop rbx
     ret
