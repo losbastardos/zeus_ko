@@ -190,6 +190,7 @@ parse_fen_string:
     ; side
     mov rdi, r15
     call fen_next_token
+    mov r15, rdi              ; pozicia za tokenom (rdi prepiseme na citanie)
     mov rdi, rax
     movzx rbx, byte [rdi]
     cmp rbx, 'w'
@@ -203,7 +204,6 @@ parse_fen_string:
 .black:
     mov byte [side], 1
 .side_done:
-    mov r15, rdi
 
     ; castle rights
     mov rdi, r15
@@ -247,6 +247,7 @@ parse_fen_string:
     ; en passant
     mov rdi, r15
     call fen_next_token
+    mov r15, rdi              ; pozicia za ep tokenom (rdi prepiseme na citanie)
     mov rdi, rax
     movzx rbx, byte [rdi]
     cmp rbx, '-'
@@ -268,7 +269,6 @@ parse_fen_string:
 .no_ep:
     mov byte [enpassant], 255
 .ep_done:
-    mov r15, rdi
 
     ; halfmove clock
     mov rdi, r15
