@@ -394,18 +394,25 @@ generate_pawn_moves:
 
 ; ============================================================
 ; add_all_promotions - prida 4 promocne tahy z r12 -> r13
+; POZOR: add_move nici r13, ciel treba pred kazdym call obnovit
 ; ============================================================
 add_all_promotions:
+    push rbx
     push r14
+    mov rbx, r13                ; cielove policko
     mov r14, FLAG_PROMO_Q
     call add_move
+    mov r13, rbx
     mov r14, FLAG_PROMO_R
     call add_move
+    mov r13, rbx
     mov r14, FLAG_PROMO_B
     call add_move
+    mov r13, rbx
     mov r14, FLAG_PROMO_N
     call add_move
     pop r14
+    pop rbx
     ret
 
 ; ============================================================

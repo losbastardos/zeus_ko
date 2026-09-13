@@ -14,6 +14,7 @@ DEFAULT REL
 ; Search pruning konstanty (E9)
 RAZOR_MARGIN    equ 250         ; razoring: eval + margin < alpha pri depth 1
 FUTILITY_MARGIN equ 150         ; futility: margin = FUTILITY_MARGIN * depth (d1: 150, d2: 300)
+EVAL_NONE       equ 0x7FFFFF00  ; sentinel: ziadny static eval (uzol v sachu)
 
 section .data
 
@@ -31,6 +32,7 @@ history:        resd 2*64*64    ; [side][from][to] history heuristic
 cap_history:    resd 6*64*6     ; [figura][to][obet] capture history heuristic
 countermoves:   resw 64*64      ; [prev_from][prev_to] -> quiet tah, ktory refutoval
 move_stack:     resw 64         ; tah odohrany na danom ply (0 = null ply)
+eval_stack:     resd 64         ; static eval na kazdom ply (pre improving flag)
 root_best_move: resd 1          ; best move z predchadzajucej ID iteracie
 null_stack:     resb 64*16      ; ulozene stavy pre null-move (side/ep/hash/halfmove)
 asp_alpha:      resd 1          ; aspiration window (root)
@@ -805,32 +807,58 @@ negamax:
     dec qword [rbp - 8]
 .iir_done:
 
-    ; --- STATICKY EVAL pre RFP / razoring / futility ---
-    ; !in_check && depth <= 3: eval z pohladu strany na tahu -> [rbp - 56]
-    ; (razoring/futility ho dalej pouzivaju pri depth <= 2)
+    ; --- STATICKY EVAL + IMPROVING FLAG ---
+    ; eval z pohladu strany na tahu pre kazdy ne-check uzol -> [rbp - 56]
+    ; a eval_stack[ply]. improving = ply>=2 && eval > eval_stack[ply-2]
+    ; (obe hodnoty musia byt platne, inak improving = 0) -> [rbp - 64]
+    mov ecx, EVAL_NONE
     cmp dword [rbp - 44], 0
-    jne .static_eval_done
-    cmp qword [rbp - 8], 3
-    jg .static_eval_done
+    jne .eval_ready                 ; v sachu: ziadny static eval
     call evaluate
     movzx ecx, byte [side]
     test ecx, ecx
-    jz .static_eval_ok
+    jz .eval_side_ok
     neg eax
-.static_eval_ok:
-    mov dword [rbp - 56], eax       ; static eval z pohladu strany na tahu
+.eval_side_ok:
+    mov ecx, eax
+.eval_ready:
+    mov [rbp - 56], ecx             ; static eval (EVAL_NONE v sachu)
+    mov rax, [search_ply]
+    lea rsi, [eval_stack]
+    mov [rsi + rax*4], ecx
+    xor edx, edx
+    cmp rax, 2
+    jl .improving_done
+    cmp ecx, EVAL_NONE
+    je .improving_done
+    mov r8d, [rsi + rax*4 - 8]      ; eval_stack[ply - 2]
+    cmp r8d, EVAL_NONE
+    je .improving_done
+    cmp ecx, r8d
+    setg dl
+.improving_done:
+    mov [rbp - 64], edx
 
     ; --- REVERSE FUTILITY PRUNING (static null move) ---
-    ; eval - margin >= beta -> return eval - margin
-    mov ecx, eax
+    ; !in_check && depth <= 3: eval - margin >= beta -> return eval - margin
+    ; margin = 120*depth; improving (eval stupa) -> 120*(depth-1), prunej menej
+    cmp dword [rbp - 44], 0
+    jne .rfp_done
+    cmp qword [rbp - 8], 3
+    jg .rfp_done
+    mov ecx, dword [rbp - 56]
     mov rdx, [rbp - 8]
     imul edx, edx, 120              ; margin = 120 * depth
+    cmp dword [rbp - 64], 0
+    je .rfp_margin_ok
+    sub edx, 120                    ; improving: margin = 120 * (depth - 1)
+.rfp_margin_ok:
     sub ecx, edx
     cmp ecx, dword [rbp - 24]       ; eval - margin >= beta?
-    jl .static_eval_done
+    jl .rfp_done
     mov eax, ecx
     jmp .neg_exit
-.static_eval_done:
+.rfp_done:
 
     ; --- RAZORING ---
     ; depth == 1 && !in_check && eval + RAZOR_MARGIN < alpha -> rovno qsearch
@@ -1272,6 +1300,10 @@ negamax:
     test rcx, rcx           ; prvy tah vzdy hladaj (mat/pat detekcia)
     jz .no_futility
     imul edx, edx, FUTILITY_MARGIN  ; margin = 150 * depth (d1: 150, d2: 300)
+    cmp dword [rbp - 64], 0         ; improving: eval stupa, prunej menej
+    je .fut_margin_ok
+    sub edx, FUTILITY_MARGIN        ; margin = 150 * (depth - 1)
+.fut_margin_ok:
     add edx, dword [rbp - 56]       ; static eval + margin
     cmp edx, dword [rbp - 16]       ; eval + margin <= alpha?
     jg .no_futility
@@ -1351,7 +1383,14 @@ negamax:
     cmp dword [rbp - 44], 0
     jne .no_lmr
     ; redukovany search: depth-2, null window (alpha, alpha+1)
+    ; !improving (eval klesa/stagnuje): redukuj este o 1 (min. child depth 1)
     dec rdi
+    cmp dword [rbp - 64], 0
+    jne .lmr_red_done
+    cmp rdi, 2
+    jl .lmr_red_done
+    dec rdi
+.lmr_red_done:
     mov rsi, [rbp - 16]
     neg rsi
     dec rsi                 ; -(alpha+1)
