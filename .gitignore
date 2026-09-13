@@ -11,7 +11,12 @@ chess-static
 # dáta / knižnice / venv
 book.book
 games.pgn
-utils/*.pgn
-utils/.venv/
 uci_debug.log
 .xdp-*
+
+# súkromné / lokálne súbory (nesmú na GitHub)
+docs/
+AGENTS.md
+.vscode/
+utils/
+SESSION_LOG.md
