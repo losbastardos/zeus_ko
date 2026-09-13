@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ============================================================
+# Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+# Vsetky prava vyhradene / All rights reserved.
+# ============================================================
+
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

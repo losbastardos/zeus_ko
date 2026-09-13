@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; tb.asm - Syzygy/Nalimov tablebase interface (stub E6)
 ; Zatial sa nenacitavaju ziadne .rtbw/.rtbz tabulky;
 ; probe funkcie vzdy vracaju TB_NOT_FOUND.

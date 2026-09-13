@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ============================================================
+# Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+# Vsetky prava vyhradene / All rights reserved.
+# ============================================================
+
 # Pomocny build script - pouziva nasm (cez nix-shell ak nie je v PATH)
 #
 # Vysledkom je jedina binarka ./chess obsahujuca vsetky backendy
