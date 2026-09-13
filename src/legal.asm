@@ -452,6 +452,16 @@ filter_legal_moves:
     sar rax, 1              ; smer = +/-1
     mov r13, rax
 
+    ; kral nesmie BYT v sachu uz na startovacom policku (is_in_check vyssie
+    ; testuje az cielove policko po aplikovani tahu, teda from by uniklo)
+    push rcx
+    movzx rbx, byte [side]
+    mov rax, r14
+    call is_square_attacked
+    pop rcx
+    test rax, rax
+    jnz .remove_move
+
     push rcx
     movzx rbx, byte [side]
     lea rax, [r14 + r13]
