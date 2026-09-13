@@ -53,7 +53,7 @@ pgn_mover_side:     resb 1          ; strana, ktora prave tahala (0 = biely)
 pgn_move_no:        resw 1          ; cislo tahu partie
 pgn_san_buf:        resb 16         ; SAN jadro (bez +/#)
 pgn_san_len:        resq 1
-pgn_line:           resb 256        ; buffer riadku movetextu
+pgn_line:           resb 8192       ; buffer movetextu (celá partia na 1 riadku)
 pgn_line_len:       resq 1
 pgn_date_buf:       resb 11         ; "YYYY.MM.DD", 0
 pgn_dec_tmp:        resb 8
@@ -309,7 +309,7 @@ pgn_san_begin:
 ; ------------------------------------------------------------
 ; pgn_write_move - append ťahu do games.pgn (volanie PO record_hash)
 ; Deteguje +/# zo stavu po ťahu (side už prehodená), zapíše číslo
-; ťahu + SAN a riadok flushne po ťahu čierneho.
+; ťahu + SAN do movetext bufferu (flush až pri uzavretí partie = 1 riadok).
 ; ------------------------------------------------------------
 pgn_write_move:
     ; lazy open súboru
@@ -358,7 +358,8 @@ pgn_write_move:
     lea rsi, [pgn_san_buf]
     mov rdx, [pgn_san_len]
     call pgn_line_write
-    call pgn_flush_line         ; real-time: každý ťah okamžite v súbore
+    mov al, ' '
+    call pgn_line_putc      ; oddeľovač; flush až pri uzavretí partie
 .out:
     ret
 
@@ -392,11 +393,7 @@ pgn_close_game:
     je .out
     cmp qword [pgn_fd], -1
     je .out
-    cmp qword [pgn_line_len], 0
-    je .no_space
-    mov al, ' '
-    call pgn_line_putc
-.no_space:
+    ; movetext v bufferi vždy končí medzerou (každý ťah ju pridá)
     movzx eax, byte [pgn_result]
     cmp eax, 1
     je .r10

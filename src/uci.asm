@@ -47,6 +47,8 @@ uci_log_bm_prefix_len equ $ - uci_log_bm_prefix
 uci_log_bm_null:   db "<< bestmove 0000", 10
 uci_log_bm_null_len equ $ - uci_log_bm_null
 uci_str_0000:      db "0000"
+uci_log_bad_bm:    db "!! WARNING: bestmove nie je legalny tah - fallback na prvy legalny", 10
+uci_log_bad_bm_len equ $ - uci_log_bad_bm
 
 section .data
 uci_log_fd: dq -2                      ; -2 = neotvorene, -1 = zlyhalo (bez retry)
@@ -930,6 +932,9 @@ search_poll_input:
     dec r13
 .dispatch:
     ; case-sensitive porovnanie prikazov
+    ; Neznamy prikaz NESMIE byt zahodeny - nechame ho v input_pend
+    ; pre uci_loop (inak by pipelined 'position'/'go' pocas searchu
+    ; zmizli a GUI by cakalo na bestmove naveky).
     cmp r13, 4
     jne .try_isready
     mov eax, dword [rbx]
@@ -937,24 +942,24 @@ search_poll_input:
     je .cmd_stop
     cmp eax, 'quit'
     je .cmd_quit
-    jmp .next_line
+    jmp .keep_line
 .try_isready:
     cmp r13, 7
     jne .try_ponderhit
     cmp dword [rbx], 'isre'
-    jne .next_line
+    jne .keep_line
     cmp dword [rbx + 3], 'eady'
-    jne .next_line
+    jne .keep_line
     jmp .cmd_isready
 .try_ponderhit:
     cmp r13, 9
-    jne .next_line
+    jne .keep_line
     cmp dword [rbx], 'pond'
-    jne .next_line
+    jne .keep_line
     cmp dword [rbx + 4], 'erhi'
-    jne .next_line
+    jne .keep_line
     cmp byte [rbx + 8], 't'
-    jne .next_line
+    jne .keep_line
 
     ; --- ponderhit: len v ponder mode prepne na casovany budget ---
     cmp byte [search_limits + 0], 4
@@ -1011,7 +1016,61 @@ search_poll_input:
     jne .done
     jmp .line_loop
 
+.keep_line:
+    ; neznamy riadok zostava v input_pend - uci_loop si ho precita po searchu
+    jmp .done
+
 .done:
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; uci_sanitize_best - poistka: bestmove musi byt legalny tah
+; Vstup:  rax = kandidat (16-bit tah, 0 = mat/pat)
+; Vystup: rax = kandidat ak sa najde v legalnom move_liste,
+;         inak prvy legalny tah (alebo 0 ak ziaden neexistuje)
+; Pozn.: generate_all_moves nici r12-r15, preto ich ukladame.
+; ============================================================
+uci_sanitize_best:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r14, rax
+    test rax, rax
+    jz .ret                       ; 0 = mat/pat, nechaj 0000
+    call generate_all_moves       ; board je na root pozicii (search skoncil)
+    movzx r15, word [move_count]
+    lea rsi, [move_list]
+    xor rcx, rcx
+.scan:
+    cmp rcx, r15
+    jge .not_found
+    movzx eax, word [rsi + rcx*2]
+    cmp ax, r14w
+    je .found
+    inc rcx
+    jmp .scan
+.found:
+    mov rax, r14
+    jmp .ret
+.not_found:
+    ; varovanie do uci_debug.log + fallback na prvy legalny tah
+    lea rdi, [uci_log_bad_bm]
+    mov esi, uci_log_bad_bm_len
+    call uci_log_str
+    test r15, r15
+    jz .zero
+    movzx rax, word [move_list]
+    jmp .ret
+.zero:
+    xor rax, rax
+.ret:
+    pop r15
+    pop r14
     pop r13
     pop r12
     pop rbx
@@ -1478,11 +1537,12 @@ uci_go:
     jge .asp_widen_high
     jmp .asp_ok
 .asp_widen_low:
-    mov eax, [asp_delta]
-    shl eax, 2                  ; delta *= 4
-    mov [asp_delta], eax
+    ; pozor: rax = bestmove z search_best_move, musi prezit do .asp_ok!
+    mov edx, [asp_delta]
+    shl edx, 2                  ; delta *= 4
+    mov [asp_delta], edx
     mov ecx, [asp_alpha]
-    sub ecx, eax
+    sub ecx, edx
     cmp ecx, -INF
     jge .wl_store
     mov ecx, -INF
@@ -1490,11 +1550,11 @@ uci_go:
     mov [asp_alpha], ecx
     jmp .asp_again
 .asp_widen_high:
-    mov eax, [asp_delta]
-    shl eax, 2
-    mov [asp_delta], eax
+    mov edx, [asp_delta]
+    shl edx, 2
+    mov [asp_delta], edx
     mov ecx, [asp_beta]
-    add ecx, eax
+    add ecx, edx
     cmp ecx, INF
     jle .wh_store
     mov ecx, INF
@@ -1540,6 +1600,7 @@ uci_go:
 
 .id_have_best:
     mov rax, r13
+    call uci_sanitize_best    ; poistka proti nelegalnemu bestmove
 
 .do_move:
     mov r12, rax
