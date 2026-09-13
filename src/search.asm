@@ -6,6 +6,10 @@
 
 DEFAULT REL
 
+; Search pruning konstanty (E9)
+RAZOR_MARGIN    equ 250         ; razoring: eval + margin < alpha pri depth 1
+FUTILITY_MARGIN equ 150         ; futility: margin = FUTILITY_MARGIN * depth (d1: 150, d2: 300)
+
 section .data
 
 q_capture_value:
@@ -19,6 +23,9 @@ search_timespec: resq 2
 search_ply:     resq 1          ; vzdialenost od rootu (pre mat skore + kille)
 killers:        resd 2*64       ; dva killer tahy na kazdy ply
 history:        resd 2*64*64    ; [side][from][to] history heuristic
+cap_history:    resd 6*64*6     ; [figura][to][obet] capture history heuristic
+countermoves:   resw 64*64      ; [prev_from][prev_to] -> quiet tah, ktory refutoval
+move_stack:     resw 64         ; tah odohrany na danom ply (0 = null ply)
 root_best_move: resd 1          ; best move z predchadzajucej ID iteracie
 null_stack:     resb 64*16      ; ulozene stavy pre null-move (side/ep/hash/halfmove)
 asp_alpha:      resd 1          ; aspiration window (root)
@@ -42,6 +49,7 @@ extern nodes_searched, search_last_score
 extern search_limits, uci_stop_flag
 extern apply_move, update_position_state
 extern generate_all_moves, is_in_check, evaluate
+extern see
 extern compute_hash
 extern tt_probe, tt_store, position_hash
 extern check_repetition
@@ -185,6 +193,14 @@ make_move:
     call compute_hash
     pop r15
     pop r14
+
+    ; move_stack[ply] = tah (countermove heuristic; null ply nuluje negamax)
+    mov rcx, [search_ply]
+    cmp rcx, 64
+    jae .skip_move_stack
+    lea rdx, [move_stack]
+    mov [rdx + rcx*2], r15w
+.skip_move_stack:
 
     add r13, 16
     mov [undo_sp], r13
@@ -345,6 +361,20 @@ quiescence:
     mov qword [rbp - 8], -32
 .qs_floor_ok:
 
+    ; bezpecnostny cap ply: undo_stack ma 64 zaznamov (sachove honenie
+    ; v qsearch ply nemusi zastavit ani pri q-depth floor)
+    cmp qword [search_ply], 60
+    jl .qs_ply_ok
+    call evaluate
+    movzx ebx, byte [side]
+    test ebx, ebx
+    jz .qs_ply_done
+    neg eax
+.qs_ply_done:
+    jmp .qs_exit
+.qs_ply_ok:
+    mov rax, [rbp - 40]     ; obnov in_check (evaluate prepisalo rax)
+
     test rax, rax
     jnz .qs_gen             ; v sachu: ziadny stand-pat, hladaj evasions
 
@@ -396,6 +426,103 @@ quiescence:
     cmp rcx, r15
     jge .qs_done
 
+    ; --- selection ordering: brania (MVV-LVA + cap_history) dopredu ---
+    ; (drive sa qsearch prehraval v poradi generovania)
+    mov r10, rcx            ; best index
+    mov r11d, -1            ; best score
+    mov r8, rcx             ; scan index
+    lea rsi, [board]
+
+.qs_sel_loop:
+    cmp r8, r15
+    jge .qs_sel_done
+
+    movzx rax, word [rbp - 544 + r8*2]
+    xor edx, edx
+
+    mov r9, rax
+    shr r9, 12
+    and r9, 0xF
+
+    cmp r9, FLAG_ENPASSANT
+    je .qs_sel_ep
+
+    cmp r9, FLAG_PROMO_Q
+    jb .qs_sel_cap_test
+    cmp r9, FLAG_PROMO_N
+    ja .qs_sel_cap_test
+    add edx, 80000          ; promocia
+.qs_sel_cap_test:
+    movzx edi, ax
+    shr rdi, 6
+    and edi, 0x3F           ; to
+    movzx edi, byte [rsi + rdi]
+    test edi, edi
+    jz .qs_sel_cmp          ; tichy tah: skore 0
+    ; MVV-LVA: 200000 + 10*obet - utocnik (zaklad bezpecne nad max.
+    ; quiet skore 50k+45k+40k, tiche tahy sa nikdy nemiesaju pred brania)
+    and edi, PIECE_MASK
+    lea r9, [q_capture_value]
+    mov edi, dword [r9 + rdi*4]
+    imul edi, edi, 10
+    add edx, 200000
+    add edx, edi
+    movzx edi, ax
+    and edi, 0x3F           ; from
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    sub edx, dword [r9 + rdi*4]
+    ; capture history: cap_history[figura][to][obet]
+    movzx edi, ax
+    and edi, 0x3F           ; from
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    dec edi
+    imul edi, edi, 384
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F           ; to
+    imul r9d, r9d, 6
+    add edi, r9d
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F
+    movzx r9d, byte [rsi + r9]  ; obet
+    and r9d, PIECE_MASK
+    dec r9d
+    add edi, r9d
+    lea r9, [cap_history]
+    add edx, dword [r9 + rdi*4]
+    jmp .qs_sel_cmp
+
+.qs_sel_ep:
+    add edx, 200900         ; pesiak (EP) berie pesiaka
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F           ; to
+    imul r9d, r9d, 6        ; (PAWN-1)*384 + to*6 + (PAWN-1)
+    lea rdi, [cap_history]
+    add edx, dword [rdi + r9*4]
+
+.qs_sel_cmp:
+    cmp edx, r11d
+    jle .qs_sel_next
+    mov r11d, edx
+    mov r10, r8
+
+.qs_sel_next:
+    inc r8
+    jmp .qs_sel_loop
+
+.qs_sel_done:
+    cmp r10, rcx
+    je .qs_sel_picked
+    mov ax, [rbp - 544 + rcx*2]
+    mov dx, [rbp - 544 + r10*2]
+    mov [rbp - 544 + rcx*2], dx
+    mov [rbp - 544 + r10*2], ax
+
+.qs_sel_picked:
     movzx rax, word [rbp - 544 + rcx*2]
 
     ; v sachu su vsetky tahy evasions (bez delta pruning)
@@ -445,6 +572,16 @@ quiescence:
     jle .qs_next
 
 .qs_tactical:
+    ; SEE pruning: zle vymenne tahy (see < 0) preskoc; v sachu (evasions) nie
+    cmp qword [rbp - 40], 0
+    jne .qs_do_move
+    push rcx
+    call see                ; vstup: ax = aktualny tah
+    pop rcx
+    test eax, eax
+    js .qs_next             ; see < 0: zla vymena, preskoc tah
+    movzx rax, word [rbp - 544 + rcx*2] ; obnov tah (see vracia skore v eax)
+.qs_do_move:
     push rcx
     call make_move
     inc qword [search_ply]
@@ -533,7 +670,21 @@ negamax:
 
 .neg_continue:
 
-    sub rsp, 584            ; 512B move_list kopia + lokaly
+    ; bezpecnostny cap ply: undo_stack ma 64 zaznamov; pri ply >= 60
+    ; vratime staticky eval (check extension + qsearch floor -32 by inak
+    ; prekrocili kapacitu a make_move by prepisal pamat za undo_stack)
+    cmp qword [search_ply], 60
+    jl .ply_cap_ok
+    call evaluate
+    movzx ebx, byte [side]
+    test ebx, ebx
+    jz .ply_cap_done
+    neg eax
+.ply_cap_done:
+    jmp .neg_exit
+.ply_cap_ok:
+
+    sub rsp, 1608           ; 512B move_list kopia + 1KB ordering klucov + lokaly
 
     mov [rbp - 8], rdi      ; depth
     mov [rbp - 16], rsi     ; alpha
@@ -649,27 +800,50 @@ negamax:
     dec qword [rbp - 8]
 .iir_done:
 
-    ; --- REVERSE FUTILITY PRUNING (static null move) ---
-    ; !in_check && depth <= 3 && eval - margin >= beta -> return eval - margin
+    ; --- STATICKY EVAL pre RFP / razoring / futility ---
+    ; !in_check && depth <= 3: eval z pohladu strany na tahu -> [rbp - 56]
+    ; (razoring/futility ho dalej pouzivaju pri depth <= 2)
     cmp dword [rbp - 44], 0
-    jne .skip_rfp
+    jne .static_eval_done
     cmp qword [rbp - 8], 3
-    jg .skip_rfp
+    jg .static_eval_done
     call evaluate
     movzx ecx, byte [side]
     test ecx, ecx
-    jz .rfp_sign_ok
+    jz .static_eval_ok
     neg eax
-.rfp_sign_ok:
-    mov ecx, eax                    ; static eval z pohladu strany na tahu
+.static_eval_ok:
+    mov dword [rbp - 56], eax       ; static eval z pohladu strany na tahu
+
+    ; --- REVERSE FUTILITY PRUNING (static null move) ---
+    ; eval - margin >= beta -> return eval - margin
+    mov ecx, eax
     mov rdx, [rbp - 8]
     imul edx, edx, 120              ; margin = 120 * depth
     sub ecx, edx
     cmp ecx, dword [rbp - 24]       ; eval - margin >= beta?
-    jl .skip_rfp
+    jl .static_eval_done
     mov eax, ecx
     jmp .neg_exit
-.skip_rfp:
+.static_eval_done:
+
+    ; --- RAZORING ---
+    ; depth == 1 && !in_check && eval + RAZOR_MARGIN < alpha -> rovno qsearch
+    ; (vynechame generovanie/search celeho zoznamu tahov, vratime vysledok qsearch)
+    cmp qword [rbp - 8], 1
+    jne .no_razoring
+    cmp dword [rbp - 44], 0
+    jne .no_razoring
+    mov eax, dword [rbp - 56]
+    add eax, RAZOR_MARGIN
+    cmp eax, dword [rbp - 16]       ; eval + margin < alpha?
+    jge .no_razoring
+    mov rdi, 4                      ; maximalna q-hlbka (ako pri prechode do qsearch)
+    mov rsi, [rbp - 16]
+    mov rdx, [rbp - 24]
+    call quiescence
+    jmp .neg_exit
+.no_razoring:
 
     ; --- NULL MOVE PRUNING (TT probe je vyssie, po RFP/IIR) ---
     ; ak povolene, depth >= 3, nie v sachu, nie koncovka, ply < 60
@@ -717,6 +891,10 @@ negamax:
     mov [rdi + 1], cl
     mov rdx, [position_hash]
     mov [rdi + 8], rdx
+    ; move_stack[ply] = 0: null tah nesmie byt klucom pre countermove
+    mov rcx, [search_ply]
+    lea rdx, [move_stack]
+    mov word [rdx + rcx*2], 0
     ; prehod stranu, zrus en passant, prepocitaj hash
     xor byte [side], 1
     mov byte [enpassant], 255
@@ -800,6 +978,128 @@ negamax:
     dec rcx
     jnz .copy_loop
 
+    ; countermove kluc: tah odohrany na ply-1 (0 = root/null ply)
+    mov rax, [search_ply]
+    test rax, rax
+    jz .no_prev_move
+    lea rcx, [move_stack]
+    movzx eax, word [rcx + rax*2 - 2]
+    jmp .prev_move_done
+.no_prev_move:
+    xor eax, eax
+.prev_move_done:
+    mov [rbp - 60], eax
+
+    ; --- predvypocet ordering klucov (jeden SEE pass pre brania) ---
+    ; kluce: [rbp-1608 + i*4]; zle brania (SEE<0) = kluc SEE < 0 (pod tiche)
+    xor rcx, rcx
+.key_loop:
+    cmp rcx, r15
+    jge .key_done
+
+    movzx rax, word [rbp - 584 + rcx*2]
+    xor edx, edx                 ; kluc = 0
+
+    mov r9, rax
+    shr r9, 12
+    and r9, 0xF                  ; flags
+
+    ; promocia?
+    cmp r9, FLAG_PROMO_Q
+    jb .key_not_promo
+    cmp r9, FLAG_PROMO_N
+    ja .key_not_promo
+    add edx, 80000
+.key_not_promo:
+
+    cmp r9, FLAG_ENPASSANT
+    je .key_ep                   ; EP: fixne skore (ako povodne), bez SEE
+
+    ; branie?
+    movzx edi, ax
+    shr rdi, 6
+    and edi, 0x3F                ; to
+    lea rsi, [board]
+    movzx edi, byte [rsi + rdi]
+    test edi, edi
+    jz .key_quiet
+
+.key_capture:
+    ; SEE ordering zlych brani (see < 0 za tiche tahy) je ZATIAL VYPNUTE:
+    ; meranie d8 startpos/e4e5 = 8094/22243 uzlov (+29%/+28%) - quiet
+    ; ordering v tomto engine nie je dostatocne silny, aby ich predbehol.
+    ; Povodny kod: push rcx / call see / pop rcx / test eax,eax /
+    ;   js .key_bad_capture / movzx rax, word [rbp - 584 + rcx*2]
+    movzx rax, word [rbp - 584 + rcx*2]
+    ; dobre branie: 200000 + MVV-LVA (+ live cap_history v selection)
+    movzx edi, ax
+    shr rdi, 6
+    and edi, 0x3F                ; to
+    lea rsi, [board]
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    lea r9, [q_capture_value]
+    mov edi, dword [r9 + rdi*4]
+    imul edi, edi, 10
+    add edx, 200000
+    add edx, edi
+    movzx edi, ax
+    and edi, 0x3F                ; from
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    sub edx, dword [r9 + rdi*4]
+    jmp .key_tt_check
+
+.key_ep:
+    add edx, 200900              ; pesiak (EP) berie pesiaka
+    jmp .key_tt_check
+
+.key_bad_capture:
+    ; kluc = SEE (zaporne): pod vsetky tiche tahy, menej zle prve
+    add edx, eax
+    jmp .key_tt_check
+
+.key_quiet:
+    test edx, edx                ; promo bez brania? nechaj 80000
+    jnz .key_tt_check
+
+    ; killer bonus
+    mov r9, [search_ply]
+    cmp r9, 63
+    ja .key_countermove
+    lea rdi, [killers]
+    cmp eax, dword [rdi + r9*8]
+    je .key_killer
+    cmp eax, dword [rdi + r9*8 + 4]
+    jne .key_countermove
+.key_killer:
+    add edx, 50000
+.key_countermove:
+    ; countermove heuristic (ply-1; 0 = root/null ply -> preskoc)
+    movzx edi, word [rbp - 60]
+    test edi, edi
+    jz .key_tt_check
+    mov r9d, edi
+    and r9d, 0x3F                ; prev from
+    shl r9d, 6
+    shr edi, 6
+    and edi, 0x3F                ; prev to
+    add edi, r9d
+    lea r9, [countermoves]
+    movzx edi, word [r9 + rdi*2]
+    cmp edi, eax
+    jne .key_tt_check
+    add edx, 45000               ; pod killerom, nad history
+.key_tt_check:
+    cmp r14w, ax                 ; TT tah ma absolutnu prioritu
+    jne .key_store
+    add edx, 1000000
+.key_store:
+    mov [rbp - 1608 + rcx*4], edx
+    inc rcx
+    jmp .key_loop
+.key_done:
+
     mov rbx, -INF           ; best
     xor r13d, r13d          ; best move
     xor rcx, rcx            ; index
@@ -808,101 +1108,101 @@ negamax:
     cmp rcx, r15
     jge .loop_done
 
-    ; jednoduche ordering: captures/promocie dopredu (selection)
+    ; selection ordering podla predvypocitanych klucov (swap tah + kluc)
     mov r10, rcx            ; best index
     mov r11d, -1            ; best score
     mov r8, rcx             ; scan index
-    lea rsi, [board]
 
 .sel_loop:
     cmp r8, r15
     jge .sel_done
-
-    movzx rax, word [rbp - 584 + r8*2]
-    xor edx, edx                 ; score = 0
-
+    movzx eax, word [rbp - 584 + r8*2]
+    mov edx, [rbp - 1608 + r8*4]
+    ; live tabulky (history/cap_history): deti/grandeti ich pocas slucky
+    ; aktualizuju, zamrznute kluce ich preto neobsahuju:
+    ;   quiet (flags==0, prazdny ciel)  -> live history[side][from][to]
+    ;   ostatne brania (vc. EP/castle/promo brania) -> live cap_history
+    ;   promo bez brania, zle brania (kluc < 0) -> len zamrznuty kluc
+    test edx, edx
+    js .sel_cmp
     mov r9, rax
     shr r9, 12
     and r9, 0xF                  ; flags
-
-    ; promocia?
-    cmp r9, FLAG_PROMO_Q
-    jb .sel_not_promo
-    cmp r9, FLAG_PROMO_N
-    ja .sel_not_promo
-    add edx, 80000
-.sel_not_promo:
-
-    ; en passant?
     cmp r9, FLAG_ENPASSANT
-    je .sel_ep
-
-    ; branie?
+    je .sel_caplive_ep
+    cmp r9, FLAG_PROMO_Q
+    jb .sel_flags0               ; flags == 0
+    cmp r9, FLAG_PROMO_N
+    jbe .sel_promo               ; promo 1-4
+    jmp .sel_caplive_to          ; castle (6): obet = board[to]
+.sel_flags0:
     movzx edi, ax
     shr rdi, 6
     and edi, 0x3F                ; to
-    movzx edi, byte [rsi + rdi]
-    test edi, edi
-    jz .sel_quiet
-
-    ; MVV-LVA: 100000 + 10*obet - utocnik
-    and edi, PIECE_MASK
-    lea r9, [q_capture_value]
-    mov edi, dword [r9 + rdi*4]
-    imul edi, edi, 10
-    add edx, 100000
-    add edx, edi
-    movzx edi, ax
-    and edi, 0x3F                ; from
-    movzx edi, byte [rsi + rdi]
-    and edi, PIECE_MASK
-    sub edx, dword [r9 + rdi*4]
-    jmp .sel_tt_check
-
-.sel_ep:
-    add edx, 100900              ; pesiak (EP) berie pesiaka
-    jmp .sel_tt_check
-
-.sel_quiet:
-    test edx, edx                ; promo bez brania? nechaj 80000
-    jnz .sel_tt_check
-
-    ; killer bonus
-    mov r9, [search_ply]
-    cmp r9, 63
-    ja .sel_history
-    lea rdi, [killers]
-    cmp eax, dword [rdi + r9*8]
-    je .sel_killer
-    cmp eax, dword [rdi + r9*8 + 4]
-    jne .sel_history
-.sel_killer:
-    add edx, 50000
-.sel_history:
-    ; history[side][from][to] (rdi + r9 su volne scratch registre)
+    lea rsi, [board]
+    movzx esi, byte [rsi + rdi]
+    test esi, esi
+    jnz .sel_caplive_v           ; branie
+    ; ---- quiet: live history[side][from][to] ----
     movzx edi, byte [side]
-    shl edi, 12                  ; side * 4096
+    shl edi, 12
     mov r9d, eax
-    and r9d, 0x3F                ; from
+    and r9d, 0x3F
     shl r9d, 6
     add edi, r9d
     mov r9d, eax
     shr r9d, 6
-    and r9d, 0x3F                ; to
+    and r9d, 0x3F
     add edi, r9d
-    lea r9, [history]
-    add edx, dword [r9 + rdi*4]
-
-.sel_tt_check:
-    cmp r14w, ax                 ; TT tah ma absolutnu prioritu
-    jne .sel_cmp
-    add edx, 1000000
+    lea rsi, [history]
+    add edx, dword [rsi + rdi*4]
+    jmp .sel_cmp
+.sel_promo:
+    movzx edi, ax
+    shr rdi, 6
+    and edi, 0x3F                ; to
+    lea rsi, [board]
+    movzx esi, byte [rsi + rdi]
+    test esi, esi
+    jz .sel_cmp                  ; promo bez brania: bez live tabuliek
+.sel_caplive_v:
+    mov r9d, esi
+    and r9d, PIECE_MASK
+    dec r9d                      ; obet 0..5
+    jmp .sel_caplive
+.sel_caplive_ep:
+    xor r9d, r9d                 ; EP: obet = PESIAK -> index 0
+    jmp .sel_caplive
+.sel_caplive_to:
+    movzx edi, ax
+    shr rdi, 6
+    and edi, 0x3F                ; to
+    lea rsi, [board]
+    movzx r9d, byte [rsi + rdi]
+    and r9d, PIECE_MASK
+    dec r9d
+.sel_caplive:
+    ; index = (figura-1)*384 + to*6 + obet; figura = board[from]
+    movzx edi, ax
+    and edi, 0x3F                ; from
+    lea rsi, [board]
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    dec edi                      ; figura 0..5
+    imul edi, edi, 384
+    mov esi, eax
+    shr esi, 6
+    and esi, 0x3F                ; to
+    imul esi, esi, 6
+    add edi, esi
+    add edi, r9d
+    lea rsi, [cap_history]
+    add edx, dword [rsi + rdi*4]
 .sel_cmp:
     cmp edx, r11d
     jle .sel_next
     mov r11d, edx
     mov r10, r8
-
 .sel_next:
     inc r8
     jmp .sel_loop
@@ -914,6 +1214,10 @@ negamax:
     mov dx, [rbp - 584 + r10*2]
     mov [rbp - 584 + rcx*2], dx
     mov [rbp - 584 + r10*2], ax
+    mov edx, [rbp - 1608 + rcx*4]
+    mov esi, [rbp - 1608 + r10*4]
+    mov [rbp - 1608 + rcx*4], esi
+    mov [rbp - 1608 + r10*4], edx
 
 .sel_picked:
 
@@ -949,6 +1253,56 @@ negamax:
     inc rcx                 ; preskoc tah
     jmp .move_loop
 .no_lmp:
+
+    ; --- FUTILITY PRUNING: beznadejne tiche tahy pri nizkej hlbke preskoc ---
+    ; !in_check && quiet && depth <= 2 && index >= 1 &&
+    ; static_eval + FUTILITY_MARGIN*depth <= alpha && alpha daleko od matu
+    cmp r12d, 1
+    jne .no_futility
+    cmp dword [rbp - 44], 0
+    jne .no_futility
+    mov rdx, [rbp - 8]      ; pozor: rax = aktualny tah pre make_move!
+    cmp rdx, 2
+    jg .no_futility
+    test rcx, rcx           ; prvy tah vzdy hladaj (mat/pat detekcia)
+    jz .no_futility
+    imul edx, edx, FUTILITY_MARGIN  ; margin = 150 * depth (d1: 150, d2: 300)
+    add edx, dword [rbp - 56]       ; static eval + margin
+    cmp edx, dword [rbp - 16]       ; eval + margin <= alpha?
+    jg .no_futility
+    cmp dword [rbp - 16], MATE_SCORE - 60
+    jge .no_futility        ; alpha blizko matu: neprunej
+    inc rcx                 ; preskoc tah
+    jmp .move_loop
+.no_futility:
+
+    ; --- SEE PRUNING tichych tahov: tiche tahy stracajuce material ---
+    ; !in_check && quiet && depth <= 4 && index >= 1 && alpha daleko od
+    ; matu && see(tah) < -50*depth (figura skonci en prise bez kompenzacie)
+    cmp r12d, 1
+    jne .no_see_prune
+    cmp dword [rbp - 44], 0
+    jne .no_see_prune
+    mov rdx, [rbp - 8]      ; pozor: rax = aktualny tah pre make_move!
+    cmp rdx, 4
+    jg .no_see_prune
+    test rcx, rcx           ; prvy tah vzdy hladaj (mat/pat detekcia)
+    jz .no_see_prune
+    cmp dword [rbp - 16], MATE_SCORE - 60
+    jge .no_see_prune       ; alpha blizko matu: neprunej
+    imul edx, edx, -100     ; prah = -100 * depth (d4: -400)
+    push rcx
+    push rdx
+    call see                ; ax = tah (tichy; gain[0] = 0)
+    mov esi, eax            ; SEE vysledok (see prepisalo rax aj rdx)
+    pop rdx                 ; prah
+    pop rcx
+    movzx rax, word [rbp - 584 + rcx*2]   ; obnov tah pre make_move
+    cmp esi, edx
+    jge .no_see_prune
+    inc rcx                 ; preskoc tah
+    jmp .move_loop
+.no_see_prune:
 
     push rcx
     call make_move
@@ -1051,18 +1405,28 @@ negamax:
     cmp edx, dword [rbp - 24]
     jl .no_cutoff
 
-    ; --- beta cutoff: aktualizuj killers/history pre QUIET tah ---
+    ; --- beta cutoff: aktualizuj killers/history/cap_history/countermove ---
     movzx eax, word [rbp - 584 + rcx*2]
     mov r9d, eax
     shr r9d, 12
-    test r9d, r9d                ; flags != 0 -> nie je to cisty quiet tah
-    jnz .cutoff_done             ; (promo/ep/castle preskoc)
+    test r9d, r9d
+    jz .cutoff_plain             ; bezny tah: quiet alebo branie
+    cmp r9d, FLAG_ENPASSANT
+    je .cutoff_ep
+    cmp r9d, FLAG_PROMO_Q
+    jb .cutoff_done              ; castle: nikdy nie je branie
+    cmp r9d, FLAG_PROMO_N
+    ja .cutoff_done
+    ; promo: spadni do testu brania (board[to] rozhodne)
+.cutoff_plain:
     movzx edi, ax
     shr edi, 6
     and edi, 0x3F                ; to
     lea rsi, [board]
     cmp byte [rsi + rdi], EMPTY
-    jne .cutoff_done             ; branie -> history nie (MVV-LVA staci)
+    jne .cutoff_capture
+    test r9d, r9d
+    jnz .cutoff_done             ; promo bez brania: nie je to cisty quiet tah
     ; killers: posun a uloz (ak uz nie je killer1)
     mov r9, [search_ply]
     cmp r9, 63
@@ -1095,6 +1459,60 @@ negamax:
     mov esi, 40000
 .cutoff_hist_store:
     mov dword [r9 + rdi*4], esi
+    ; countermove: uloz tah ako refutaciu opponentovho posledneho tahu
+    ; (kluc = tah na ply-1; pri root/null ply klucom nie je -> preskoc)
+    mov r9, [search_ply]
+    test r9, r9
+    jz .cutoff_done
+    lea rdx, [move_stack]
+    movzx edx, word [rdx + r9*2 - 2]
+    test edx, edx
+    jz .cutoff_done
+    mov esi, edx
+    and esi, 0x3F                ; prev from
+    shl esi, 6
+    shr edx, 6
+    and edx, 0x3F                ; prev to
+    add edx, esi
+    lea rsi, [countermoves]
+    mov [rsi + rdx*2], ax        ; countermove = cutoff tah
+    jmp .cutoff_done
+
+.cutoff_ep:
+    ; en passant: obet = PESIAK, iduca figura = PESIAK
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F                ; to
+    imul edi, edi, 6             ; (PAWN-1)*384 + to*6 + (PAWN-1)
+    lea rsi, [cap_history]
+    jmp .cutoff_cap_bonus
+
+.cutoff_capture:
+    ; cap_history[figura][to][obet] += depth^2 so saturaciou 40000
+    ; (rsi = board, rdi = to z .cutoff_plain)
+    movzx r9d, byte [rsi + rdi]  ; obet
+    and r9d, PIECE_MASK
+    dec r9d
+    imul edi, edi, 6
+    add edi, r9d
+    movzx r9d, ax
+    and r9d, 0x3F                ; from
+    movzx r9d, byte [rsi + r9]   ; iduca figura
+    and r9d, PIECE_MASK
+    dec r9d
+    imul r9d, r9d, 384
+    add edi, r9d
+    lea rsi, [cap_history]
+.cutoff_cap_bonus:
+    mov r9d, dword [rsi + rdi*4]
+    mov edx, dword [rbp - 8]     ; depth
+    imul edx, edx
+    add r9d, edx
+    cmp r9d, 40000
+    jle .cutoff_cap_store
+    mov r9d, 40000
+.cutoff_cap_store:
+    mov dword [rsi + rdi*4], r9d
 .cutoff_done:
     jmp .loop_done
 
@@ -1169,7 +1587,7 @@ search_best_move:
     mov qword [search_ply], 0
     mov rbx, rdi            ; odloz hlbku searchu (generate_all_moves prepise r12-r15)
 
-    ; vynuluj killer tabulku; history len pri prvej ID iteracii
+    ; vynuluj killer tabulku; history/cap_history/countermoves len pri prvej ID iteracii
     lea rdi, [killers]
     mov rcx, 2*64
     xor eax, eax
@@ -1178,6 +1596,12 @@ search_best_move:
     jne .skip_history_clear
     lea rdi, [history]
     mov rcx, 2*64*64
+    rep stosd
+    lea rdi, [cap_history]
+    mov rcx, 6*64*6
+    rep stosd
+    lea rdi, [countermoves]
+    mov rcx, 64*64/2          ; slova -> po dvoch v dworde
     rep stosd
 .skip_history_clear:
 

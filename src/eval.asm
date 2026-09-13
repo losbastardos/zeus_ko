@@ -1,5 +1,5 @@
 ; ============================================================
-; eval.asm - jednoducha evaluacna funkcia
+; eval.asm - tapered evaluacia (MG/EG interpolacia)
 ; ============================================================
 
 %include "chess.inc"
@@ -8,9 +8,12 @@ DEFAULT REL
 
 section .data
 
-global evaluate
+global evaluate, eval_dbg_mg, eval_dbg_eg
+eval_dbg_mg: dd 0
+eval_dbg_eg: dd 0
 
-material:
+; MG material = povodne hodnoty; EG: pesiaci viac, leziece menej
+material_mg:
     dd 0            ; EMPTY
     dd 100          ; PAWN
     dd 320          ; KNIGHT
@@ -19,9 +22,28 @@ material:
     dd 900          ; QUEEN
     dd 20000        ; KING
 
+material_eg:
+    dd 0            ; EMPTY
+    dd 120          ; PAWN
+    dd 300          ; KNIGHT
+    dd 310          ; BISHOP
+    dd 520          ; ROOK
+    dd 940          ; QUEEN
+    dd 20000        ; KING
+
+; vaha fazy podla typu figury (non-pawn material; max 24 = 4N+4B+4R+2Q... 2*(1+1+2+4))
+phase_weights:
+    db 0            ; EMPTY
+    db 0            ; PAWN
+    db 1            ; KNIGHT
+    db 1            ; BISHOP
+    db 2            ; ROOK
+    db 4            ; QUEEN
+    db 0            ; KING
+
 pst_empty:  times 64 db 0
 
-pst_pawn:
+pst_pawn_mg:
     db   0,  0,  0,  0,  0,  0,  0,  0
     db  50, 50, 50, 50, 50, 50, 50, 50
     db  10, 10, 20, 30, 30, 20, 10, 10
@@ -31,7 +53,18 @@ pst_pawn:
     db   5, 10, 10,-20,-20, 10, 10,  5
     db   0,  0,  0,  0,  0,  0,  0,  0
 
-pst_knight:
+; EG: posunute pesiaci hodnejsi (zaratava sa aj v passed bonuse)
+pst_pawn_eg:
+    db   0,  0,  0,  0,  0,  0,  0,  0
+    db  60, 60, 60, 60, 60, 60, 60, 60
+    db  20, 20, 25, 30, 30, 25, 20, 20
+    db  10, 10, 15, 25, 25, 15, 10, 10
+    db   5,  5, 10, 20, 20, 10,  5,  5
+    db   0,  0,  5,  5,  5,  5,  0,  0
+    db   5,  5,  0,  0,  0,  0,  5,  5
+    db   0,  0,  0,  0,  0,  0,  0,  0
+
+pst_knight_mg:
     db -50,-40,-30,-30,-30,-30,-40,-50
     db -40,-20,  0,  0,  0,  0,-20,-40
     db -30,  0, 10, 15, 15, 10,  0,-30
@@ -41,7 +74,17 @@ pst_knight:
     db -40,-20,  0,  5,  5,  0,-20,-40
     db -50,-40,-30,-30,-30,-30,-40,-50
 
-pst_bishop:
+pst_knight_eg:
+    db -50,-40,-30,-30,-30,-30,-40,-50
+    db -40,-20,  0,  0,  0,  0,-20,-40
+    db -30,  0, 10, 15, 15, 10,  0,-30
+    db -30,  5, 15, 20, 20, 15,  5,-30
+    db -30,  0, 15, 20, 20, 15,  0,-30
+    db -30,  5, 10, 15, 15, 10,  5,-30
+    db -40,-20,  0,  5,  5,  0,-20,-40
+    db -50,-40,-30,-30,-30,-30,-40,-50
+
+pst_bishop_mg:
     db -20,-10,-10,-10,-10,-10,-10,-20
     db -10,  0,  0,  0,  0,  0,  0,-10
     db -10,  0,  5, 10, 10,  5,  0,-10
@@ -51,7 +94,17 @@ pst_bishop:
     db -10,  5,  0,  0,  0,  0,  5,-10
     db -20,-10,-10,-10,-10,-10,-10,-20
 
-pst_rook:
+pst_bishop_eg:
+    db -20,-10,-10,-10,-10,-10,-10,-20
+    db -10,  0,  0,  0,  0,  0,  0,-10
+    db -10,  0,  5, 10, 10,  5,  0,-10
+    db -10,  5,  5, 10, 10,  5,  5,-10
+    db -10,  0, 10, 10, 10, 10,  0,-10
+    db -10, 10, 10, 10, 10, 10, 10,-10
+    db -10,  5,  0,  0,  0,  0,  5,-10
+    db -20,-10,-10,-10,-10,-10,-10,-20
+
+pst_rook_mg:
     db   0,  0,  0,  0,  0,  0,  0,  0
     db   5, 10, 10, 10, 10, 10, 10,  5
     db  -5,  0,  0,  0,  0,  0,  0, -5
@@ -61,7 +114,17 @@ pst_rook:
     db  -5,  0,  0,  0,  0,  0,  0, -5
     db   0,  0,  0,  5,  5,  0,  0,  0
 
-pst_queen:
+pst_rook_eg:
+    db   0,  0,  0,  0,  0,  0,  0,  0
+    db   5, 10, 10, 10, 10, 10, 10,  5
+    db  -5,  0,  0,  0,  0,  0,  0, -5
+    db  -5,  0,  0,  0,  0,  0,  0, -5
+    db  -5,  0,  0,  0,  0,  0,  0, -5
+    db  -5,  0,  0,  0,  0,  0,  0, -5
+    db  -5,  0,  0,  0,  0,  0,  0, -5
+    db   0,  0,  0,  5,  5,  0,  0,  0
+
+pst_queen_mg:
     db -20,-10,-10, -5, -5,-10,-10,-20
     db -10,  0,  0,  0,  0,  0,  0,-10
     db -10,  0,  5,  5,  5,  5,  0,-10
@@ -71,7 +134,18 @@ pst_queen:
     db -10,  0,  5,  0,  0,  0,  0,-10
     db -20,-10,-10, -5, -5,-10,-10,-20
 
-pst_king:
+pst_queen_eg:
+    db -20,-10,-10, -5, -5,-10,-10,-20
+    db -10,  0,  0,  0,  0,  0,  0,-10
+    db -10,  0,  5,  5,  5,  5,  0,-10
+    db  -5,  0,  5,  5,  5,  5,  0, -5
+    db   0,  0,  5,  5,  5,  5,  0, -5
+    db -10,  5,  5,  5,  5,  5,  0,-10
+    db -10,  0,  5,  0,  0,  0,  0,-10
+    db -20,-10,-10, -5, -5,-10,-10,-20
+
+; MG kral: utulok v rohu (bezpecnost)
+pst_king_mg:
     db -30,-40,-40,-50,-50,-40,-40,-30
     db -30,-40,-40,-50,-50,-40,-40,-30
     db -30,-40,-40,-50,-50,-40,-40,-30
@@ -81,14 +155,34 @@ pst_king:
     db  20, 20,  0,  0,  0,  0, 20, 20
     db  20, 30, 10,  0,  0, 10, 30, 20
 
-pst_ptrs:
+; EG kral: centralizacia (opacny charakter nez MG)
+pst_king_eg:
+    db -20,-10,-10,-10,-10,-10,-10,-20
+    db -10,  0,  5,  5,  5,  5,  0,-10
+    db -10,  5, 15, 15, 15, 15,  5,-10
+    db -10,  5, 15, 25, 25, 15,  5,-10
+    db -10,  5, 15, 25, 25, 15,  5,-10
+    db -10,  5, 15, 15, 15, 15,  5,-10
+    db -10,  0,  5,  5,  5,  5,  0,-10
+    db -20,-10,-10,-10,-10,-10,-10,-20
+
+pst_ptrs_mg:
     dq pst_empty
-    dq pst_pawn
-    dq pst_knight
-    dq pst_bishop
-    dq pst_rook
-    dq pst_queen
-    dq pst_king
+    dq pst_pawn_mg
+    dq pst_knight_mg
+    dq pst_bishop_mg
+    dq pst_rook_mg
+    dq pst_queen_mg
+    dq pst_king_mg
+
+pst_ptrs_eg:
+    dq pst_empty
+    dq pst_pawn_eg
+    dq pst_knight_eg
+    dq pst_bishop_eg
+    dq pst_rook_eg
+    dq pst_queen_eg
+    dq pst_king_eg
 
 ; masky stlpcov (bit f, f+8, ...) pre pawn structure / open files
 file_masks:
@@ -134,19 +228,175 @@ ROOK_SEMI      equ 10
 ROOK_SEVENTH   equ 15
 TEMPO_BONUS    equ 10
 
+; mobility: bonus za dosiahnutelne policko (N/B/R/Q), MG/EG
+mob_w_mg:   db 0, 0, 4, 5, 2, 1, 0    ; index = typ figury
+mob_w_eg:   db 0, 0, 4, 5, 4, 2, 0
+
+; king safety (iba MG)
+SHIELD_PAWN    equ 0    ; pesiak v suprade pred kralom
+KINGOPEN_PEN   equ 0    ; otvoreny file pri kralovi (ziadny pesiak)
+KINGSEMI_PEN   equ 0     ; semi-otvoreny vlastnymi (vlastny chyba)
+
+; jazdec na outposte (MG/EG), centralne file 2..5 viac
+OUTPOST_MG     equ 0
+OUTPOST_EG     equ 0
+OUTPOST_C_MG   equ 0
+OUTPOST_C_EG   equ 0
+
 section .text
 
 extern board
 extern side
 
 ; ============================================================
-; evaluate - vrati skore z pohladu bieleho
+; MOB_WALK df, dr, sliding - krok/luc mobility z policka
+; Zrata dosiahnutelne policka do ecx. Register set mobility pasu:
+;   rbx = board base, r12 = from, r13d = farba (0/8),
+;   r10d/r11d = zakladny file/rank, ecx = counter,
+;   r8d/r9d = kurzor file/rank, eax/edx/esi/edi = scratch
+; ============================================================
+%macro MOB_WALK 3
+    mov r8d, r10d
+    add r8d, %1
+    mov r9d, r11d
+    add r9d, %2
+%%step:
+    cmp r8d, 7
+    ja %%done               ; mimo 0..7 (unsigned chyti aj zaporne)
+    cmp r9d, 7
+    ja %%done
+    mov esi, r9d
+    shl esi, 3
+    add esi, r8d            ; cielove policko
+    movzx edi, byte [rbx + rsi]
+    test edi, edi
+    jz %%empty
+    mov esi, edi
+    and esi, COLOR_MASK
+    cmp esi, r13d
+    je %%done               ; vlastna figura: blokuje (nepocitaj)
+    inc ecx                 ; nepriatelska figura: branie dostupne
+    jmp %%done
+%%empty:
+    inc ecx
+%if %3
+    add r8d, %1
+    add r9d, %2
+    jmp %%step
+%endif
+%%done:
+%endmacro
+
+; ============================================================
+; eval_knight_outpost - jazdec na outposte?
+; Vstup:  r12 = sq, r13d = farba jazdca (0/8)
+; Vystup: eax = 1 (outpost: rank 4-6, brany vlastnym pesiacom,
+;                  bez utoku nepriatelskeho pesiaca), inak 0
+; Clobber: rax, rcx, rdx, rsi, rdi, r8
+; ============================================================
+eval_knight_outpost:
+    mov eax, r12d
+    shr eax, 3              ; rank
+    test r13d, r13d
+    jnz .rank_b
+    cmp eax, 3              ; biely rank 4-6 (idx 3-5)
+    jb .no
+    cmp eax, 5
+    ja .no
+    jmp .rank_ok
+.rank_b:
+    cmp eax, 2              ; cierny rank 3-5 (idx 2-4, mirror)
+    jb .no
+    cmp eax, 4
+    ja .no
+.rank_ok:
+    mov r8d, r12d
+    and r8d, 7              ; f
+    lea rsi, [board]
+    ; --- brany vlastnym pesiacom ---
+    ; biely: pesiac na sq-7 (f>=1), sq-9 (f<=6)
+    ; cierny: pesiac na sq+7 (f<=6), sq+9 (f>=1)
+    test r13d, r13d
+    jnz .def_b
+    test r8d, r8d
+    jz .def_w9
+    lea ecx, [r12 - 7]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | WHITE
+    je .defended
+.def_w9:
+    cmp r8d, 7
+    je .no
+    lea ecx, [r12 - 9]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | WHITE
+    jne .no
+    jmp .defended
+.def_b:
+    cmp r8d, 7
+    je .def_b9
+    lea ecx, [r12 + 7]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | BLACK
+    je .defended
+.def_b9:
+    test r8d, r8d
+    jz .no
+    lea ecx, [r12 + 9]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | BLACK
+    jne .no
+.defended:
+    ; --- nie je napadnutelny nepriatelskymi pesiacmi ---
+    ; biely: cierni pesiaci na sq+7 (f<=6), sq+9 (f>=1)
+    ; cierny: bieli pesiaci na sq-7 (f>=1), sq-9 (f<=6)
+    test r13d, r13d
+    jnz .atk_b
+    cmp r8d, 7
+    je .atk_w9
+    lea ecx, [r12 + 7]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | BLACK
+    je .no
+.atk_w9:
+    test r8d, r8d
+    jz .yes
+    lea ecx, [r12 + 9]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | BLACK
+    je .no
+    jmp .yes
+.atk_b:
+    test r8d, r8d
+    jz .atk_b9
+    lea ecx, [r12 - 7]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | WHITE
+    je .no
+.atk_b9:
+    cmp r8d, 7
+    je .yes
+    lea ecx, [r12 - 9]
+    movzx edx, byte [rsi + rcx]
+    cmp edx, PAWN | WHITE
+    je .no
+.yes:
+    mov eax, 1
+    ret
+.no:
+    xor eax, eax
+    ret
+
+; ============================================================
+; evaluate - vrati skore z pohladu bieleho (tapered MG/EG)
 ; Vystup: eax = skore
+; Fazy: phase = suma vah non-pawn materialu (max 24);
+;       skore = (mg*phase + eg*(24-phase)) / 24
 ; ============================================================
 evaluate:
     push rbp
     mov rbp, rsp
-    sub rsp, 48
+    sub rsp, 80
     push rbx
     push r12
     push r13
@@ -162,14 +412,22 @@ evaluate:
     ; [rbp-32..-25] = pocty ciernych pesiacov per file
     ; [rbp-36] = pocet bielych strelcov (dword)
     ; [rbp-40] = pocet ciernych strelcov (dword)
+    ; [rbp-48] = EG akumulator (dword)
+    ; [rbp-56] = faza hry (dword, max 24)
+    ; [rbp-64] = policko bieleho krala (dword)
+    ; [rbp-68] = policko cierneho krala (dword)
     xor eax, eax
     mov [rbp - 8], rax
     mov [rbp - 16], rax
     mov [rbp - 24], rax
     mov [rbp - 32], rax
     mov [rbp - 40], rax
+    mov [rbp - 48], rax
+    mov [rbp - 56], rax
+    mov [rbp - 64], rax
+    mov [rbp - 68], rax
 
-    xor r15d, r15d          ; celkove skore
+    xor r15d, r15d          ; MG akumulator
     xor r12, r12            ; index policka
 
 .next_square:
@@ -182,27 +440,52 @@ evaluate:
     and r14d, PIECE_MASK    ; typ figury
     and r13d, COLOR_MASK    ; farba (0 alebo BLACK=8)
 
-    ; material
-    lea rdi, [material]
+    ; --- MG hodnota ---
+    lea rdi, [material_mg]
     mov eax, dword [rdi + r14*4]
-
-    ; PST
-    lea rdi, [pst_ptrs]
+    lea rdi, [pst_ptrs_mg]
     mov rdi, [rdi + r14*8]
     mov rbx, r12
     test r13d, r13d
-    jz .pst_index
+    jz .mg_index
     xor rbx, 56             ; mirror pre cierne
-.pst_index:
-    movsx ebx, byte [rdi + rbx]
-    add eax, ebx            ; eax = hodnota figury z pohladu bieleho
+.mg_index:
+    movsx edx, byte [rdi + rbx]
+    add eax, edx            ; eax = MG hodnota figury
 
+    ; --- EG hodnota (rovnaky mirror index v rbx) ---
+    lea rdi, [material_eg]
+    mov edx, dword [rdi + r14*4]
+    lea rdi, [pst_ptrs_eg]
+    mov rdi, [rdi + r14*8]
+    movsx edi, byte [rdi + rbx]
+    add edx, edi            ; edx = EG hodnota figury
+
+    ; --- akumulacia (biely +, cierny -) ---
     test r13d, r13d
     jz .add_white
     sub r15d, eax
-    jmp .collect
+    sub dword [rbp - 48], edx
+    jmp .phase_add
 .add_white:
     add r15d, eax
+    add dword [rbp - 48], edx
+
+.phase_add:
+    ; prispevok k faze (non-pawn material)
+    lea rdi, [phase_weights]
+    movzx eax, byte [rdi + r14]
+    add dword [rbp - 56], eax
+
+    ; policka kralov pre king safety
+    cmp r14d, KING
+    jne .collect
+    test r13d, r13d
+    jnz .king_b_sq
+    mov [rbp - 64], r12d
+    jmp .collect
+.king_b_sq:
+    mov [rbp - 68], r12d
 
 .collect:
     ; zber dat pre pawn structure / bishop pair
@@ -236,6 +519,240 @@ evaluate:
     inc r12
     cmp r12, 64
     jl .next_square
+
+    ; ================= MOBILITY + OUTPOSTY =================
+    ; pocet pseudo-legálnych cielov N/B/R/Q (prazdne + super policka,
+    ; vlastne figury blokuju); vaha za policko podla typu, MG/EG
+    lea rbx, [board]
+    xor r12, r12
+.mob_loop:
+    movzx r13d, byte [rbx + r12]
+    test r13d, r13d
+    jz .mob_next
+    mov r14d, r13d
+    and r14d, PIECE_MASK
+    cmp r14d, KNIGHT
+    jb .mob_next
+    cmp r14d, QUEEN
+    ja .mob_next
+    and r13d, COLOR_MASK
+    mov r10d, r12d
+    and r10d, 7              ; zakladny file
+    mov r11d, r12d
+    shr r11d, 3              ; zakladny rank
+    cmp r14d, KNIGHT
+    je .mob_knight
+    cmp r14d, BISHOP
+    je .mob_b
+    cmp r14d, ROOK
+    je .mob_r
+    ; dama: diagonalne + rovne
+    MOB_WALK  1,  1, 1
+    MOB_WALK  1, -1, 1
+    MOB_WALK -1,  1, 1
+    MOB_WALK -1, -1, 1
+    MOB_WALK  1,  0, 1
+    MOB_WALK -1,  0, 1
+    MOB_WALK  0,  1, 1
+    MOB_WALK  0, -1, 1
+    jmp .mob_score
+.mob_b:
+    MOB_WALK  1,  1, 1
+    MOB_WALK  1, -1, 1
+    MOB_WALK -1,  1, 1
+    MOB_WALK -1, -1, 1
+    jmp .mob_score
+.mob_r:
+    MOB_WALK  1,  0, 1
+    MOB_WALK -1,  0, 1
+    MOB_WALK  0,  1, 1
+    MOB_WALK  0, -1, 1
+    jmp .mob_score
+.mob_knight:
+    ; outpost pred countom (ecx este volne)
+    call eval_knight_outpost
+    test eax, eax
+    jz .mob_kn_count
+    mov eax, OUTPOST_MG
+    mov edx, OUTPOST_EG
+    mov esi, r12d
+    and esi, 7
+    cmp esi, 2               ; centralne file c-f (2..5): viac
+    jb .mob_op_score
+    cmp esi, 5
+    jbe .mob_op_c
+    jmp .mob_op_score
+.mob_op_c:
+    mov eax, OUTPOST_C_MG
+    mov edx, OUTPOST_C_EG
+.mob_op_score:
+    test r13d, r13d
+    jz .mob_op_w
+    sub r15d, eax
+    sub dword [rbp - 48], edx
+    jmp .mob_kn_count
+.mob_op_w:
+    add r15d, eax
+    add dword [rbp - 48], edx
+.mob_kn_count:
+    xor ecx, ecx
+    MOB_WALK  1,  2, 0
+    MOB_WALK  2,  1, 0
+    MOB_WALK  2, -1, 0
+    MOB_WALK  1, -2, 0
+    MOB_WALK -1, -2, 0
+    MOB_WALK -2, -1, 0
+    MOB_WALK -2,  1, 0
+    MOB_WALK -1,  2, 0
+.mob_score:
+    lea rsi, [mob_w_mg]
+    movzx eax, byte [rsi + r14]
+    imul eax, ecx
+    lea rsi, [mob_w_eg]
+    movzx edx, byte [rsi + r14]
+    imul edx, ecx
+    test r13d, r13d
+    jz .mob_w
+    sub r15d, eax
+    sub dword [rbp - 48], edx
+    jmp .mob_next
+.mob_w:
+    add r15d, eax
+    add dword [rbp - 48], edx
+.mob_next:
+    inc r12
+    cmp r12, 64
+    jl .mob_loop
+
+    ; ================= KING SAFETY (iba MG) =================
+    ; plati na vlastnej polovici (biely rank 0-3, cierny 4-7):
+    ; - suprada pesiacov 1-2 ranky pred kralom: +SHIELD_PAWN za kazdeho
+    ; - file krala +/- susedne: otvoreny -KINGOPEN_PEN, semi -KINGSEMI_PEN
+    ; --- biely kral ---
+    mov r12d, [rbp - 64]
+    mov eax, r12d
+    shr eax, 3
+    cmp eax, 3
+    ja .ks_w_done               ; kral za centralizovany: bez bonusu
+    lea ecx, [r12 + 8]
+    cmp ecx, 64
+    jae .ks_w_files
+    movzx edx, byte [rbx + rcx]
+    cmp edx, PAWN | WHITE
+    jne .ks_w_sh2
+    add r15d, SHIELD_PAWN
+.ks_w_sh2:
+    add ecx, 8
+    cmp ecx, 64
+    jae .ks_w_files
+    movzx edx, byte [rbx + rcx]
+    cmp edx, PAWN | WHITE
+    jne .ks_w_files
+    add r15d, SHIELD_PAWN
+.ks_w_files:
+    mov r8d, r12d
+    and r8d, 7                  ; file krala
+    lea r9d, [r8 - 1]
+    cmp r9d, 0
+    jge .ks_w_fx0
+    xor r9d, r9d
+.ks_w_fx0:
+    mov r10d, r8d
+    add r10d, 1
+    cmp r10d, 7
+    jle .ks_w_fx_loop
+    mov r10d, 7
+.ks_w_fx_loop:
+    cmp r9d, r10d
+    jg .ks_w_done
+    movzx eax, byte [rbp - 24 + r9]    ; biele pesiacie na file
+    movzx edx, byte [rbp - 32 + r9]    ; cierne pesiacie na file
+    lea ecx, [rax + rdx]
+    test ecx, ecx
+    jnz .ks_w_semi
+    sub r15d, KINGOPEN_PEN
+    jmp .ks_w_fx_next
+.ks_w_semi:
+    test eax, eax
+    jnz .ks_w_fx_next
+    sub r15d, KINGSEMI_PEN
+.ks_w_fx_next:
+    inc r9d
+    jmp .ks_w_fx_loop
+.ks_w_done:
+
+    ; --- cierny kral ---
+    mov r12d, [rbp - 68]
+    mov eax, r12d
+    shr eax, 3
+    cmp eax, 4
+    jb .ks_b_done               ; kral prilis vysoko/centralizovany: skip
+    lea ecx, [r12 - 8]
+    jmp .ks_b_sh1
+.ks_b_sh1:
+    test ecx, ecx
+    js .ks_b_files
+    movzx edx, byte [rbx + rcx]
+    cmp edx, PAWN | BLACK
+    jne .ks_b_sh2
+    sub r15d, SHIELD_PAWN
+.ks_b_sh2:
+    sub ecx, 8
+    test ecx, ecx
+    js .ks_b_files
+    movzx edx, byte [rbx + rcx]
+    cmp edx, PAWN | BLACK
+    jne .ks_b_files
+    sub r15d, SHIELD_PAWN
+.ks_b_files:
+    mov r8d, r12d
+    and r8d, 7
+    lea r9d, [r8 - 1]
+    cmp r9d, 0
+    jge .ks_b_fx0
+    xor r9d, r9d
+.ks_b_fx0:
+    mov r10d, r8d
+    add r10d, 1
+    cmp r10d, 7
+    jle .ks_b_fx_loop
+    mov r10d, 7
+.ks_b_fx_loop:
+    cmp r9d, r10d
+    jg .ks_b_done
+    movzx eax, byte [rbp - 24 + r9]
+    movzx edx, byte [rbp - 32 + r9]
+    lea ecx, [rax + rdx]
+    test ecx, ecx
+    jnz .ks_b_semi
+    add r15d, KINGOPEN_PEN      ; penal pre cierneho = plus pre bieleho
+    jmp .ks_b_fx_next
+.ks_b_semi:
+    test edx, edx               ; vlastny = cierny
+    jnz .ks_b_fx_next
+    add r15d, KINGSEMI_PEN
+.ks_b_fx_next:
+    inc r9d
+    jmp .ks_b_fx_loop
+.ks_b_done:
+
+    ; DEBUG dump
+    mov [eval_dbg_mg], r15d
+    mov eax, [rbp - 48]
+    mov [eval_dbg_eg], eax
+
+    ; --- tapered interpolacia: skore = (mg*phase + eg*(24-phase)) / 24 ---
+    mov eax, [rbp - 48]         ; eg
+    mov ecx, 24
+    sub ecx, [rbp - 56]         ; 24 - phase
+    imul eax, ecx               ; eg * (24-phase)
+    mov edx, r15d               ; mg
+    imul edx, [rbp - 56]        ; mg * phase
+    add eax, edx
+    cdq
+    mov ecx, 24
+    idiv ecx
+    mov r15d, eax               ; tapered skore do r15 (dalsie termy pripocitavaju)
 
     ; --- bishop pair ---
     cmp dword [rbp - 36], 2
