@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; tt.asm - jednoducha alokacia/mazanie transposition table
 ; ============================================================
 

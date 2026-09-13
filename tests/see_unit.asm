@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; see_unit.asm - standalone unit test pre see (src/see.asm)
 ; Build: nasm -f elf64 -I src/ tests/see_unit.asm -o /tmp/see_unit.o
 ;        ld /tmp/see_unit.o obj/see.o -o /tmp/see_unit

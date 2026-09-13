@@ -1,3 +1,8 @@
+# ============================================================
+# Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+# Vsetky prava vyhradene / All rights reserved.
+# ============================================================
+
 # Makefile pre sachovy engine (NASM x86-64 Linux)
 
 TARGET      = chess

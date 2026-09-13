@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; book.asm - opening book, podpora viacerych suborov
 ; Format zaznamu: hash(8B) | move(2B)  (little-endian)
 ; ============================================================

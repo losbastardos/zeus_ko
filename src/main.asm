@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; main.asm - hlavny vstup a herna slucka
 ; ============================================================
 
@@ -1231,5 +1236,3 @@ _start:
     mov rax, SYS_EXIT
     xor rdi, rdi
     syscall
-
-

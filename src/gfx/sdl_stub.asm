@@ -1,4 +1,9 @@
 ; ============================================================
+; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
+; Vsetky prava vyhradene / All rights reserved.
+; ============================================================
+
+; ============================================================
 ; sdl_stub.asm - stub SDL backendu pre staticky linkovany build
 ; Staticky build (chess-static) nema libSDL2, tento stub nahradi
 ; gfx/sdl.o a vsetky SDL funkcie hlasia zlyhanie - engine padne
