@@ -51,7 +51,7 @@ global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern board, side, castle, enpassant, halfmove, fullmove
 extern moved_piece, captured_piece
 extern move_list, move_count
-extern pv_moves, pv_moves_len
+extern pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 extern nodes_searched, search_last_score
 extern search_limits, uci_stop_flag
 extern apply_move, update_position_state
@@ -351,6 +351,10 @@ quiescence:
     jmp .qs_exit
 
 .qs_continue:
+
+    ; vynuluj PV pre aktualny ply (qsearch nema pokracovanie)
+    mov rax, [search_ply]
+    mov qword [pv_len + rax*8], 0
 
     sub rsp, 544            ; 512B move copy + 32B locals
 
@@ -732,6 +736,10 @@ negamax:
     jmp .neg_exit
 
 .neg_continue:
+
+    ; vynuluj PV pre aktualny ply
+    mov rax, [search_ply]
+    mov qword [pv_len + rax*8], 0
 
     ; bezpecnostny cap ply: undo_stack ma 64 zaznamov; pri ply >= 60
     ; vratime staticky eval (check extension + qsearch floor -32 by inak
@@ -1712,6 +1720,43 @@ negamax:
     movsxd rdx, eax         ; 64-bit ciste ulozenie alpha (hore bez smeti)
     mov [rbp - 16], rdx
 
+    ; --- PV update: tento tah zvysil alpha ---
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+
+    mov rax, [search_ply]
+    mov rbx, rax
+    shl rbx, 7
+    lea rdi, [pv_table + rbx]
+    movzx ecx, word [rbp - 584 + rcx*2]   ; aktualny tah
+    mov [rdi], cx
+
+    ; skopiruj child PV (ply+1) za prvy tah
+    mov rdi, rax
+    inc rdi
+    mov rbx, [pv_len + rdi*8]      ; dlzka child PV
+    mov rcx, rbx
+    shl rdi, 7
+    lea rsi, [pv_table + rdi]      ; zdroj child PV
+    mov rdi, rax
+    shl rdi, 7
+    lea rdi, [pv_table + rdi + 2]  ; ciel za prvy tah
+    rep movsw
+
+    ; uloz dlzku parent PV = child len + 1
+    mov rax, [search_ply]
+    lea rdx, [rax + 1]
+    mov rdx, [pv_len + rdx*8]
+    inc rdx
+    mov [pv_len + rax*8], rdx
+
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+
 .check_cutoff:
     mov edx, dword [rbp - 16]
     cmp edx, dword [rbp - 24]
@@ -1894,6 +1939,7 @@ search_best_move:
     mov qword [nodes_searched], 0
     mov dword [search_last_score], 0
     mov qword [search_ply], 0
+    mov qword [root_pv_len], 0   ; root PV zacina prazdna
     mov rbx, rdi            ; odloz hlbku searchu (generate_all_moves prepise r12-r15)
 
     ; vynuluj killer tabulku; history/cap_history/countermoves len pri prvej ID iteracii
@@ -2080,6 +2126,33 @@ search_best_move:
     mov dword [root_alpha], eax   ; alpha = best
     movzx r14d, word [rsp + rcx*2]
 
+    ; --- update root PV (ply 0) ---
+    push rax
+    push rbx
+    push rcx
+    push rsi
+    push rdi
+    push r14
+
+    lea rdi, [root_pv_table]     ; prvy tah root PV
+    mov [rdi], r14w
+
+    mov rcx, [pv_len]            ; dlzka child PV (ply 0, lebo root negamax bezi na ply 0)
+    mov rbx, rcx
+    lea rsi, [pv_table]          ; child PV zaciatok
+    lea rdi, [root_pv_table + 2] ; parent za prvym tahom
+    rep movsw
+
+    inc rbx
+    mov [root_pv_len], rbx       ; dlzka root PV
+
+    pop r14
+    pop rdi
+    pop rsi
+    pop rcx
+    pop rbx
+    pop rax
+
 .next:
     inc rcx
     jmp .move_loop
@@ -2201,58 +2274,29 @@ perft:
     ret
 
 ; ============================================================
-; collect_pv - ulozi celu PV do pv_moves[] (pre panel)
-; Vstup: rdi = prvy tah (root best move)
-; Pozor: volat az po skonceni searchu (undo_stack musi byt prazdny)
+; collect_pv - ulozi celu PV do pv_moves[] (pre panel/UCI)
+; Pouziva predpocitanu pv_table z searchu (rychlejsie ako TT sonda).
 ; ============================================================
 collect_pv:
-    push rbx
-    push r12
-    push r13
+    push rsi
+    push rdi
+    push rcx
+    push rax
 
-    mov qword [pv_moves_len], 0
-    mov r12, rdi            ; aktualny tah
-    xor r13, r13            ; pocet spravenych tahov
+    mov rax, [root_pv_len]  ; dlzka root PV
+    cmp rax, 40
+    jle .len_ok
+    mov rax, 40
+.len_ok:
+    mov [pv_moves_len], rax
 
-.loop:
-    test r12, r12
-    jz .done
-    cmp r13, 40
-    jge .done
+    mov rcx, rax
+    lea rsi, [root_pv_table] ; zdroj
+    lea rdi, [pv_moves]      ; ciel
+    rep movsw
 
-    ; uloz tah do pv_moves
-    mov rbx, [pv_moves_len]
-    lea rax, [pv_moves]
-    mov [rax + rbx*2], r12w
-    inc rbx
-    mov [pv_moves_len], rbx
-
-    ; aplikuj tah
-    mov rax, r12
-    call make_move
-    inc r13
-
-    ; dalsi tah z TT
-    mov rdi, [position_hash]
-    xor esi, esi
-    mov rdx, -INF
-    mov rcx, INF
-    call tt_probe
-    test edx, edx
-    jz .done
-    movzx r12, r8w
-    jmp .loop
-
-.done:
-    ; vraciam poziciu
-.unmake_loop:
-    test r13, r13
-    jz .ret
-    call unmake_move
-    dec r13
-    jmp .unmake_loop
-.ret:
-    pop r13
-    pop r12
-    pop rbx
+    pop rax
+    pop rcx
+    pop rdi
+    pop rsi
     ret

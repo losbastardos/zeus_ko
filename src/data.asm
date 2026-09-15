@@ -154,7 +154,7 @@ msg_files_rev_len equ $ - msg_files_rev
 global move_history, move_history_len
 global captured_by_white, captured_by_white_len
 global captured_by_black, captured_by_black_len
-global book_moves, book_moves_len, pv_moves, pv_moves_len
+global book_moves, book_moves_len, pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 
 global book_filename, config_filename, key_book, default_book, key_search_depth, default_search_depth
 global key_language, default_language
@@ -598,6 +598,15 @@ book_moves:     resw 64
 book_moves_len: resq 1
 pv_moves:       resw 40
 pv_moves_len:   resq 1
+
+; PV table ulozena pocas searchu: pv_table[ply][0..len-1], pv_len[ply]
+pv_table:       resw 64*64
+pv_len:         resq 64
+
+; Root PV storage (nezavisle od pv_table, lebo root negamax bezi na ply 0
+; a nuloval by si pv_len[0] pri kazdom root tahu).
+root_pv_table:  resw 64
+root_pv_len:    resq 1
 
 ; Podpora viacerych opening book suborov
 book_ptrs:      resq 4
