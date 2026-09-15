@@ -261,6 +261,12 @@ OUTPOST_EG     equ 8
 OUTPOST_C_MG   equ 25
 OUTPOST_C_EG   equ 10
 
+; strelec na outposte (iba MG), konzervativne
+B_OUTPOST_MG     equ 10
+B_OUTPOST_EG     equ 0
+B_OUTPOST_C_MG   equ 15
+B_OUTPOST_C_EG   equ 0
+
 
 
 section .text
@@ -591,6 +597,34 @@ evaluate:
     MOB_WALK  1, -1, 1
     MOB_WALK -1,  1, 1
     MOB_WALK -1, -1, 1
+    ; outpost pre strelca (konzervativny, iba MG)
+    push rcx
+    call eval_knight_outpost      ; funkcia je genericka (rank + pesiak brani / neutok)
+    test eax, eax
+    jz .mob_b_done
+    mov eax, B_OUTPOST_MG
+    mov edx, B_OUTPOST_EG
+    mov esi, r12d
+    and esi, 7
+    cmp esi, 2
+    jb .mob_b_op_score
+    cmp esi, 5
+    jbe .mob_b_op_c
+    jmp .mob_b_op_score
+.mob_b_op_c:
+    mov eax, B_OUTPOST_C_MG
+    mov edx, B_OUTPOST_C_EG
+.mob_b_op_score:
+    test r13d, r13d
+    jz .mob_b_op_w
+    sub r15d, eax
+    sub dword [rbp - 48], edx
+    jmp .mob_b_done
+.mob_b_op_w:
+    add r15d, eax
+    add dword [rbp - 48], edx
+.mob_b_done:
+    pop rcx
     jmp .mob_score
 .mob_r:
     xor ecx, ecx
