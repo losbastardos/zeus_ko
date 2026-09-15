@@ -151,6 +151,8 @@ extern load_lang_pack, lang_get
 extern uci_loop
 extern clear_history, record_move, book_lookup_all, print_status
 extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
+extern bench_fens, bench_fens_count
+extern bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
 extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
 extern key_language, default_language
 extern lang_file_en, lang_file_sk
@@ -219,12 +221,16 @@ extern msg_new_game, msg_new_game_len
 extern msg_view_white, msg_view_white_len
 extern write_cstr
 extern uci_id_name, uci_id_author, uci_ok
+extern uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_overhead
 extern msg_view_black, msg_view_black_len
 extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmove, engine_side, uci_requested
 extern gfx_active_backend
 extern lang_is_en
-extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size
+extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead
 extern tt_init
+extern parse_fen_string, uci_now_ms
+extern nodes_searched
+extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
 
 %define SYS_GETPID 39
 
@@ -893,8 +899,9 @@ _start:
     mov byte [uci_own_book], 1
     mov byte [uci_ponder], 0
     mov byte [uci_stop_flag], 0
-    mov dword [uci_hash_size], 16
-    mov rdi, 16
+    mov dword [uci_hash_size], 64
+    mov dword [uci_move_overhead], 100
+    mov rdi, 64
     call tt_init
 
     ; nacitaj konfiguraciu
@@ -1041,6 +1048,12 @@ _start:
     je .do_go
     cmp rax, 5
     je .do_uci
+    cmp rax, 6
+    je .do_suite_cmd
+    cmp rax, 7
+    je .do_suite_cmd
+    cmp rax, 8
+    je .do_bench
 
     mov al, [move_buf]
     cmp al, 'l'
@@ -1120,6 +1133,83 @@ _start:
     call perft
     call print_number
     call print_newline
+    jmp .game_loop
+
+.do_bench:
+    ; Zobraz popis bench
+    lea rdi, [bench_str_header]
+    call write_cstr
+
+    ; cas start
+    call uci_now_ms
+    mov r15, rax                ; r15 = start time
+    xor r14, r14                ; r14 = total nodes
+
+    ; Uloz stav hry (board, side, castle, ep, hash_history, search_limits)
+    call suite_snapshot_save
+
+    ; --- beznaj vsektych 6 FEN pozicii s depth 9 ---
+    xor r13, r13                ; r13 = index
+.bench_loop:
+    cmp r13, bench_fens_count
+    jge .bench_done
+
+    ; Nacitaj FEN pointer
+    lea rax, [bench_fens]
+    mov rdi, [rax + r13*8]
+    call parse_fen_string
+    call init_hash_history
+    call record_hash
+    call clear_history
+
+    ; Urob search do hlbky 9
+    mov rdi, 9
+    call search_best_move
+
+    ; Pricti nodes (nodes_searched)
+    mov rax, [nodes_searched]
+    add r14, rax
+
+    inc r13
+    jmp .bench_loop
+
+.bench_done:
+    ; Obnov stav hry
+    call suite_snapshot_restore
+
+    ; Vypocitaj cas
+    call uci_now_ms
+    sub rax, r15                ; elapsed ms
+    mov r15, rax
+
+    ; Vypis nodes
+    lea rdi, [bench_str_nodes]
+    call write_cstr
+    mov rdi, r14
+    call print_number
+    call print_newline
+
+    ; Vypis cas
+    lea rdi, [bench_str_time]
+    call write_cstr
+    mov rdi, r15
+    call print_number
+    call print_newline
+
+    ; Vypis NPS (nodes * 1000 / ms)
+    test r15, r15
+    jz .bench_skip_nps
+    mov rax, r14
+    imul rax, 1000
+    xor rdx, rdx
+    div r15
+    mov r13, rax            ; r13 = NPS (callee-saved)
+    lea rdi, [bench_str_nps]
+    call write_cstr
+    mov rdi, r13
+    call print_number
+    call print_newline
+.bench_skip_nps:
     jmp .game_loop
 
 .do_flip:
@@ -1218,10 +1308,24 @@ _start:
     call write_cstr
     lea rdi, [uci_id_author]
     call write_cstr
+    lea rdi, [uci_opt_hash]
+    call write_cstr
+    lea rdi, [uci_opt_ownbook]
+    call write_cstr
+    lea rdi, [uci_opt_ponder]
+    call write_cstr
+    lea rdi, [uci_opt_syzygy]
+    call write_cstr
+    lea rdi, [uci_opt_overhead]
+    call write_cstr
     lea rdi, [uci_ok]
     call write_cstr
     call uci_loop
     jmp .done
+
+.do_suite_cmd:
+    call suite_cmd_text
+    jmp .game_loop
 
 .illegal:
     mov rax, SYS_WRITE

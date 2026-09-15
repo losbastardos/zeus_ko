@@ -49,6 +49,8 @@ global msg_files_rev, msg_files_rev_len
 
 global rank_char_buf, square_char_buf, square_str_buf, num_buf
 global square_str_buf
+global bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
+global bench_fens, bench_fens_count
 
 ; Pociatocna pozicia
 initial_board:
@@ -90,12 +92,17 @@ msg_engine:
 msg_engine_len equ $ - msg_engine - 1
 
 msg_prompt:
-    db "Tah (e2e4, list, flip, perft N, gfx, text, new, go, exit): ", 0
+    db "Tah (e2e4, list, flip, perft N, bench, suite FILE [N], gfx, text, new, go, exit): ", 0
 msg_prompt_len equ $ - msg_prompt - 1
 
 msg_error_input:
-    db "Neplatny vstup! e2e4, list, flip, perft N, gfx, text, new, go, exit.", 10, 0
+    db "Neplatny vstup! e2e4, list, flip, perft N, bench, suite FILE [N], gfx, text, new, go, exit.", 10, 0
 msg_error_input_len equ $ - msg_error_input - 1
+
+bench_str_header: db "Bench: prehladavam 6 pozicii do hlbky 9...", 10, 0
+bench_str_nodes:  db "Uzly: ", 0
+bench_str_time:   db "Cas (ms): ", 0
+bench_str_nps:    db "NPS: ", 0
 
 msg_error_illegal:
     db "Nelegalny tah!", 10, 0
@@ -287,9 +294,9 @@ lkey_color_prompt: db "color.prompt", 0
 ldef_color_prompt: db "Enter choice or press Enter: ", 0
 
 lkey_prompt_move: db "prompt.move", 0
-ldef_prompt_move: db "Move (e2e4, list, flip, perft N, gfx, text, new, go, exit): ", 0
+ldef_prompt_move: db "Move (e2e4, list, flip, perft N, suite FILE [N], gfx, text, new, go, exit): ", 0
 lkey_prompt_invalid_input: db "prompt.invalid_input", 0
-ldef_prompt_invalid_input: db "Invalid input! Use e2e4, list, flip, perft N, gfx, text, new, go, exit.", 0
+ldef_prompt_invalid_input: db "Invalid input! Use e2e4, list, flip, perft N, suite FILE [N], gfx, text, new, go, exit.", 0
 
 lkey_status_white: db "status.white", 0
 ldef_status_white: db "WHITE to move", 0
@@ -385,6 +392,56 @@ square_char_buf: db "? ", 0
 square_str_buf:  db "??", 0
 num_buf:         db 16 dup(0)
 
+; --- LMR tabulka: redukcie pre Late Move Reduction ---
+; [depth-1][index], depth 1-16, index 0-15
+; Formula: redukcia ~ log(depth) * log(index); nulove redukcie pre male values
+global lmr_table
+lmr_table:
+    ; depth 1: vsetky 0
+    db 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ; depth 2
+    db 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    ; depth 3
+    db 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2
+    ; depth 4
+    db 0, 0, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3
+    ; depth 5
+    db 0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 6
+    db 0, 0, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 7
+    db 0, 0, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 8
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 9
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 10
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 11
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 12
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 13
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 14
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 15
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+    ; depth 16
+    db 0, 0, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+
+; --- Benchmark FEN pozicie ---
+bench_fens:
+    dq .fen1, .fen2, .fen3, .fen4, .fen5, .fen6
+bench_fens_count equ ($ - bench_fens) / 8
+
+.fen1: db "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 0
+.fen2: db "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 0
+.fen3: db "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - -", 0
+.fen4: db "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 0
+.fen5: db "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8", 0
+.fen6: db "r4rk1/8/8/8/8/8/8/R3K2R w KQ - 0 1", 0
+
 ; --- BSS ---
 section .bss
 
@@ -421,11 +478,12 @@ board_flip:     resb 1
 ; 0 = engine hra biely, 1 = cierny, 2 = oboch, 3 = ziaden
 engine_side:    resb 1
 
-global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size
+global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead
 uci_stop_flag:  resb 1
 uci_ponder:     resb 1
 uci_own_book:   resb 1
 uci_hash_size:  resd 1
+uci_move_overhead: resd 1    ; milliseconds overhead per move (default 100 ms)
 global lang_is_en
 lang_is_en:     resb 1
 
@@ -452,6 +510,9 @@ search_limits:
 
 nodes_searched: resq 1
 search_last_score: resd 1
+
+global singular_excl
+singular_excl:  resd 1      ; excluded move pre singular extensions (0 = ziaden)
 
 global lang_txt_menu_title, lang_txt_menu_select, lang_txt_menu_mode_1, lang_txt_menu_mode_2, lang_txt_menu_mode_3, lang_txt_menu_mode_4, lang_txt_menu_mode_5
 global lang_txt_menu_prompt, lang_txt_menu_invalid_1_5, lang_txt_menu_unavailable

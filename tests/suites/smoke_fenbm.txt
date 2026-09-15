@@ -1,0 +1,4 @@
+# Format: FEN | bestmoves (comma or spaces) | id
+6k1/7Q/6K1/8/8/8/8/8 w - - 0 1 | h7h8 | mate1_qh8
+6k1/5Q2/6K1/8/8/8/8/8 w - - 0 1 | f7g7 | mate1_qg7
+6k1/8/6K1/8/8/8/5q2/7k b - - 0 1 | f2g2 | mate1_qg2

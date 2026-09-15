@@ -63,6 +63,7 @@ extern check_repetition
 extern hash_history, hash_count
 extern tb_piece_count, tb_probe_wdl
 extern search_poll_input
+extern singular_excl
 
 ; ============================================================
 ; check_time - periodicka kontrola timeoutu pre UCI search
@@ -356,6 +357,7 @@ quiescence:
     mov [rbp - 8], rdi      ; q-depth
     mov [rbp - 16], rsi     ; alpha
     mov [rbp - 24], rdx     ; beta
+    mov [rbp - 48], rsi     ; alpha_orig (pre TT bound flag)
 
     ; je strana na tahu v sachu?
     movzx eax, byte [side]
@@ -382,6 +384,27 @@ quiescence:
 .qs_ply_ok:
     mov rax, [rbp - 40]     ; obnov in_check (evaluate prepisalo rax)
 
+    ; --- TT PROBE v qsearch ---
+    ; depth = 0 marker pre qsearch entries; aj move_only je vzorny
+    mov rdi, [position_hash]
+    xor esi, esi            ; depth = 0 (qsearch marker)
+    mov rdx, [rbp - 16]
+    mov rcx, [rbp - 24]
+    call tt_probe
+    cmp edx, 1
+    jne .qs_tt_probe_move
+    ; v sachu sa stand-pat nesmie pouzit (ani z TT score)
+    mov rax, [rbp - 40]
+    test rax, rax
+    jnz .qs_gen
+    jmp .qs_tt_score
+.qs_tt_probe_move:
+    cmp edx, 2
+    jne .qs_no_tt_hit
+    ; TODO: move-only hint ak bude patria
+.qs_no_tt_hit:
+
+    mov rax, [rbp - 40]     ; obnov in_check (tt_probe prepisuje rax)
     test rax, rax
     jnz .qs_gen             ; v sachu: ziadny stand-pat, hladaj evasions
 
@@ -392,16 +415,27 @@ quiescence:
     jz .qs_eval_done
     neg eax
 .qs_eval_done:
+    mov ebx, eax
     mov dword [rbp - 32], eax
+    jmp .qs_after_standpat
 
-    cmp eax, dword [rbp - 24]
+.qs_tt_score:
+    ; TT usable score
+    mov ebx, eax
+    mov dword [rbp - 32], eax
+    jmp .qs_check_standpat
+
+.qs_after_standpat:
+
+.qs_check_standpat:
+    cmp ebx, dword [rbp - 24]
     jge .qs_return_standpat
 
-    cmp eax, dword [rbp - 16]
-    jle .qs_after_alpha
-    movsxd rdx, eax         ; 64-bit ciste ulozenie alpha (hore bez smeti)
+    cmp ebx, dword [rbp - 16]
+    jle .qs_after_alpha2
+    movsxd rdx, ebx         ; 64-bit ciste ulozenie alpha (hore bez smeti)
     mov [rbp - 16], rdx
-.qs_after_alpha:
+.qs_after_alpha2:
 
     ; q-depth vycerpana a nie v sachu: koniec (stand-pat v alpha)
     cmp qword [rbp - 8], 0
@@ -640,10 +674,32 @@ quiescence:
 
 .qs_done:
     mov eax, ebx
-    jmp .qs_exit
+    jmp .qs_store_tt
 
 .qs_return_standpat:
     mov eax, dword [rbp - 32]
+
+.qs_store_tt:
+    ; Store do TT (depth=0 pre qsearch, flag = EXACT/LOWER/UPPER)
+    mov ecx, TT_EXACT
+    cmp eax, dword [rbp - 24]
+    jge .qs_tt_lower
+    cmp eax, dword [rbp - 48]
+    jle .qs_tt_upper
+    jmp .qs_tt_flag_done
+.qs_tt_upper:
+    mov ecx, TT_UPPER
+    jmp .qs_tt_flag_done
+.qs_tt_lower:
+    mov ecx, TT_LOWER
+.qs_tt_flag_done:
+    push rax
+    mov rdi, [position_hash]
+    xor esi, esi            ; depth = 0 (qsearch marker)
+    mov edx, eax            ; score
+    xor r8d, r8d            ; move
+    call tt_store
+    pop rax
 
 .qs_exit:
     mov rsp, rbp
@@ -691,12 +747,15 @@ negamax:
     jmp .neg_exit
 .ply_cap_ok:
 
-    sub rsp, 1608           ; 512B move_list kopia + 1KB ordering klucov + lokaly
+    sub rsp, 1616           ; 512B move_list kopia + 1KB ordering klucov + lokaly
+                            ; [rbp-72] = singular_move (0=normalny), [rbp-48] = tt_score
 
     mov [rbp - 8], rdi      ; depth
     mov [rbp - 16], rsi     ; alpha
     mov [rbp - 24], rdx     ; beta
     mov [rbp - 40], rcx     ; allow_null
+    mov dword [rbp - 48], -32000  ; tt_score pre singular (NONE)
+    mov dword [rbp - 72], 0       ; singular_move = 0 (nie sme v singular sub-searchi)
 
     cmp qword [rbp - 8], 0
     jne .not_leaf
@@ -797,6 +856,15 @@ negamax:
     cmp edx, 2
     jne .tt_probe_done
     mov r14d, r8d           ; zapamataj si TT tah pre ordering
+    mov dword [rbp - 48], -32000    ; tt_score pre singular: NONE
+    jmp .tt_probe_done
+.tt_score_hit:
+    mov r14d, r8d           ; tt_move
+    mov [rbp - 48], eax     ; tt_score pre singular extensions
+    ; TT usable score: vratan priamo ak nie sme v singular sub-searchi
+    cmp dword [singular_excl], 0
+    jne .tt_probe_done      ; v singular sub-searchi: neprunej priamo
+    jmp .neg_exit           ; vracia eax = tt score
 .tt_probe_done:
 
     ; --- IIR: pri vysokej hlbke bez TT tahu zniz hlbku o 1 ---
@@ -806,6 +874,114 @@ negamax:
     jnz .iir_done
     dec qword [rbp - 8]
 .iir_done:
+
+    ; --- PROBCUT (depth >= 5, !in_check, nie v singular sub-searchi) ---
+    ; Skus brania s oknom (beta+PROBCUT_MARGIN, beta+PROBCUT_MARGIN+1) na depth-4.
+    ; Ak fail-high -> prune (tento uzol presiahne beta aj v plnom searchi).
+    ; PROBCUT_MARGIN = 200 cps (Stockfish-like hodnota)
+%define PROBCUT_MARGIN 200
+    cmp qword [rbp - 8], 5
+    jl .probcut_done
+    cmp dword [rbp - 44], 0         ; !in_check
+    jne .probcut_done
+    cmp dword [singular_excl], 0    ; nie v singular sub-searchi
+    jne .probcut_done
+    ; vygeneruj tahy (brania) a skus kazde s uzkou oknom
+    call generate_all_moves
+    movzx r15, word [move_count]
+    test r15, r15
+    jz .probcut_done
+    ; uloz move_list do docasneho miesta (reuse [rbp-584] = kopia zoznamu)
+    lea rsi, [move_list]
+    lea rdi, [rbp - 584]
+    movzx rcx, word [move_count]
+.pc_copy:
+    mov ax, [rsi]
+    mov [rdi], ax
+    add rsi, 2
+    add rdi, 2
+    dec rcx
+    jnz .pc_copy
+    ; precist cez brania (flags == 0 ale board[to] != EMPTY)
+    xor rcx, rcx
+.pc_loop:
+    cmp rcx, r15
+    jge .probcut_done
+    movzx rax, word [rbp - 584 + rcx*2]
+    ; je to branie? (to = board[to] != EMPTY a flags != promo/castle/ep simple)
+    mov r9d, eax
+    shr r9d, 12
+    and r9d, 0xF
+    cmp r9d, 5                      ; EP = flag 5 -> capture
+    je .pc_is_capture
+    cmp r9d, 6                      ; castle: nie je branie
+    je .pc_next
+    cmp r9d, 0
+    jne .pc_next                    ; promo non-capture: preskoc
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    lea rsi, [board]
+    movzx esi, byte [rsi + rdi]
+    test esi, esi
+    jz .pc_next                     ; prazdne: nie je branie
+.pc_is_capture:
+    ; SEE >= 0? (neprunej zle brania v ProbCut)
+    push rax
+    push rcx
+    call see
+    mov esi, eax
+    pop rcx
+    pop rax
+    test esi, esi
+    js .pc_next                     ; zle branie: preskoc
+    ; skus tah
+    push rax
+    push rcx
+    call make_move
+    inc qword [search_ply]
+    pop rcx
+    pop rax
+    ; search: -negamax(depth-4, -beta-PROBCUT_MARGIN-1, -beta-PROBCUT_MARGIN, 0)
+    mov rdi, [rbp - 8]
+    sub rdi, 4
+    test rdi, rdi
+    jl .pc_undo
+    jnz .pc_depth_ok
+    mov rdi, 1
+.pc_depth_ok:
+    mov rsi, [rbp - 24]
+    add rsi, PROBCUT_MARGIN
+    neg rsi                         ; -(beta + margin)
+    mov rdx, rsi
+    inc rdx                         ; -(beta + margin) + 1
+    push rcx                        ; zachovaj index cez negamax+unmake
+    xor ecx, ecx
+    call negamax
+    neg eax
+    push rax
+    dec qword [search_ply]
+    call unmake_move
+    pop rax
+    pop rcx
+    cmp eax, dword [rbp - 24]
+    jl .pc_no_cut
+    add eax, PROBCUT_MARGIN
+    jmp .neg_exit                   ; ProbCut! vracia score
+.pc_no_cut:
+    jmp .pc_next_after_undo
+.pc_undo:
+    push rcx                        ; unmake_move clobberuje caller-saved registre
+    dec qword [search_ply]
+    call unmake_move
+    pop rcx
+.pc_next_after_undo:
+    ; obnov r15 (move_count moze byt prepisan)
+    movzx r15, word [move_count]
+.pc_next:
+    inc rcx
+    jmp .pc_loop
+.probcut_done:
 
     ; --- STATICKY EVAL + IMPROVING FLAG ---
     ; eval z pohladu strany na tahu pre kazdy ne-check uzol -> [rbp - 56]
@@ -1255,6 +1431,18 @@ negamax:
 .sel_picked:
 
     movzx rax, word [rbp - 584 + rcx*2]
+
+    ; --- excluded move skip (singular sub-search) ---
+    ; ak singular_excl != 0, preskoc excluded tah
+    mov edx, dword [singular_excl]
+    test edx, edx
+    jz .no_excl_skip
+    cmp dx, ax                      ; porovnaj 16-bit tah
+    jne .no_excl_skip
+    inc rcx
+    jmp .move_loop
+.no_excl_skip:
+
     ; r12 = 1 ak je to QUIET tah (flags==0 && board[to]==EMPTY) - pre LMR
     xor r12d, r12d
     mov r9d, eax
@@ -1341,19 +1529,89 @@ negamax:
     jmp .move_loop
 .no_see_prune:
 
-    push rcx
-    call make_move
+    ; --- SINGULAR EXTENSIONS (depth >= 8, TT tah, nie v sachu na tomto uzle) ---
+    ; Ak je tento tah TT tahom a TT score je platny, skus singular search:
+    ; re-search ostatnych tahov (excluded = tento tah) na depth/2 s oknom
+    ; (ttScore - SING_MARGIN, ttScore - SING_MARGIN + 1). Ak fail-low -> extend.
+    ; Ak fail-high -> multi-cut prune (beta cutoff).
+    ; rcx = index tahov; rax = aktualny tah (pre make_move)
+    mov dword [rbp - 72], 0         ; vycisti extension flag
+    cmp qword [rbp - 8], 8
+    jl .no_singular
+    cmp dword [rbp - 44], 0         ; nie v sachu
+    jne .no_singular
+    cmp dword [singular_excl], 0    ; nie v singular sub-searchi
+    jne .no_singular
+    cmp r14d, 0                     ; mame TT tah
+    je .no_singular
+    cmp r14w, ax                    ; je to TT tah?
+    jne .no_singular
+    mov edx, dword [rbp - 48]       ; tt_score
+    cmp edx, -31000                 ; platny TT score?
+    jle .no_singular
+    cmp edx, MATE_SCORE - 200       ; nie mat
+    jge .no_singular
+    ; sBeta = ttScore - 64
+    sub edx, 64
+    mov [singular_excl], eax        ; uloz excluded move (tento tah)
+    push rax                        ; zachovaj tah
+    push rcx                        ; zachovaj index
+    ; singular search: depth/2, alpha=sBeta-1, beta=sBeta, allow_null=0
+    mov rdi, [rbp - 8]
+    shr rdi, 1                      ; depth/2
+    test rdi, rdi
+    jnz .sing_depth_ok
+    mov rdi, 1
+.sing_depth_ok:
+    mov esi, edx
+    dec esi                         ; alpha = sBeta - 1
+    movsxd rsi, esi
+    movsxd rdx, edx                 ; beta = sBeta
+    xor ecx, ecx                    ; allow_null = 0
+    call negamax
+    neg eax                         ; -score (z pohladu protihraca)
+    mov r10d, eax                   ; uloz singular score
+    pop rcx
+    pop rdx                         ; tah (ulozeny pred singular search)
+    mov dword [singular_excl], 0    ; vymaz excluded move
+    movzx rax, dx                   ; obnov tah pre make_move (16-bit)
+    cmp r10d, dword [rbp - 24]      ; singular fail-high? (multi-cut)
+    jge .singular_cutoff
+    ; fail-low? -> extension
+    mov edx, dword [rbp - 48]
+    sub edx, 64                     ; sBeta
+    cmp r10d, edx
+    jl .set_singular_ext            ; singular! extend toto
+    jmp .no_singular
+.singular_cutoff:
+    mov eax, r10d
+    jmp .neg_exit_singular          ; beta cutoff
+.set_singular_ext:
+    mov dword [rbp - 72], 1         ; nastavenie extension flagu
+.no_singular:
+    push rcx                        ; make_move/clanky mozu prepisat rcx
+    call make_move                  ; aplikuj aktualny tah pred child searchom
+    pop rcx
     inc qword [search_ply]
-    mov rcx, [rsp]          ; obnov index (make_move moze clobberovat rcx)
+    ; rcx je uz korektne obnoven z pop rcx pocas singular vetve
+    ; (alebo nikdy nebol modifikovany v .no_singular path)
 
     ; --- child depth: +1 extension ak je vlastny kral v sachu (cap ply 40) ---
+    ; +1 extension tiez pre singular move (singular_excl=0 pred make_move,
+    ;    singular_excl_check prebehol vyssie, ext_flag v [rbp-72])
     mov rdi, [rbp - 8]
     cmp dword [rbp - 44], 0
     je .child_depth
     cmp qword [search_ply], 40
     jae .child_depth
-    jmp .depth_ready          ; extension: depth sa neznizuje
+    jmp .depth_ready          ; check extension: depth sa neznizuje
 .child_depth:
+    ; --- SINGULAR EXTENSION: ak bol tento tah oznaceny (ext_flag=1), +1 ---
+    cmp dword [rbp - 72], 1
+    jne .no_sing_ext
+    mov dword [rbp - 72], 0  ; vymaz flag (plati len pre prvy tah)
+    jmp .depth_ready          ; depth sa neznizuje = extension
+.no_sing_ext:
     dec rdi
 .depth_ready:
     mov [rbp - 52], rdi     ; child depth (pre PVS/LMR re-search)
@@ -1367,8 +1625,10 @@ negamax:
     neg rsi                 ; -beta
     mov rdx, [rbp - 16]
     neg rdx                 ; -alpha
-    mov rcx, 1              ; allow_null = 1
+    push rcx                ; zachovaj index; negamax je caller-saved pre rcx
+    mov rcx, 1              ; allow_null = 1 (negamax parameter)
     call negamax
+    pop rcx                 ; obnov index
     neg eax                 ; -score
     jmp .after_search
 
@@ -1396,10 +1656,12 @@ negamax:
     dec rsi                 ; -(alpha+1)
     mov rdx, [rbp - 16]
     neg rdx                 ; -alpha
-    mov rcx, 1
+    push rcx                ; zachovaj index
     push rdi                ; zachovaj child depth
+    mov rcx, 1
     call negamax
     pop rdi
+    pop rcx                 ; obnov index
     neg eax
     cmp eax, dword [rbp - 16]
     jle .after_search       ; fail-low: prijmi redukovany vysledok
@@ -1410,8 +1672,10 @@ negamax:
     dec rsi                 ; -(alpha+1)
     mov rdx, [rbp - 16]
     neg rdx                 ; -alpha
+    push rcx                ; zachovaj index
     mov rcx, 1
     call negamax
+    pop rcx                 ; obnov index
     neg eax
     ; PVS: ak alpha < score < beta -> re-search plne okno
     cmp eax, dword [rbp - 16]
@@ -1423,15 +1687,19 @@ negamax:
     neg rsi                 ; -beta
     mov rdx, [rbp - 16]
     neg rdx                 ; -alpha
+    push rcx                ; zachovaj index
     mov rcx, 1
     call negamax
+    pop rcx                 ; obnov index
     neg eax
 
 .after_search:
     dec qword [search_ply]
 
+    push rcx                        ; unmake_move clobberuje caller-saved registre
     call unmake_move
     pop rcx
+    ; rcx je uz obnoven (nikdy sa neupravil v .after_search ceste bez pop)
 
     cmp eax, ebx
     jle .alpha_update
@@ -1597,10 +1865,7 @@ negamax:
     mov eax, ebx            ; tt_store clobberuje rax, vrat skore
     jmp .neg_exit
 
-.tt_score_hit:
-    ; eax = skore z TT, priamo ho vratime
-    jmp .neg_exit
-
+.neg_exit_singular:         ; pouziva sa zo singular multi-cut (eax = score)
 .neg_exit:
     mov rsp, rbp
 .neg_fast_exit:
@@ -1779,8 +2044,10 @@ search_best_move:
     movsxd rdx, dword [asp_alpha]
     neg rdx                 ; -alpha
 .root_call:
+    push rcx                ; zachovaj index
     mov rcx, 1              ; allow_null = 1
     call negamax
+    pop rcx                 ; obnov index
     neg eax
     ; PVS re-search: null-window tah s alpha < score < beta
     cmp qword [rsp], 0
@@ -1795,12 +2062,14 @@ search_best_move:
     neg rsi
     movsxd rdx, dword [asp_alpha]
     neg rdx
+    push rcx                ; zachovaj index
     mov rcx, 1
     call negamax
+    pop rcx                 ; obnov index
     neg eax
 .root_searched:
     call unmake_move
-    pop rcx
+    pop rcx                 ; index pushnuty pred make_move
 
     cmp byte [uci_stop_flag], 0
     jne .loop_done

@@ -226,27 +226,42 @@ lo_rank_masks:
 BISHOP_PAIR    equ 30
 DOUBLED_PEN    equ 12
 ISOLATED_PEN   equ 15
-PASSED_BASE    equ 10
-PASSED_STEP    equ 20
+PASSED_BASE    equ 15
+PASSED_STEP    equ 25
 ROOK_OPEN      equ 25
-ROOK_SEMI      equ 10
-ROOK_SEVENTH   equ 15
-TEMPO_BONUS    equ 10
+ROOK_SEMI      equ 12
+ROOK_SEVENTH   equ 20
+ROOK_BEHIND_PP equ 18    ; veza za prekonajucim pesiakom
+TEMPO_BONUS    equ 15
 
 ; mobility: bonus za dosiahnutelne policko (N/B/R/Q), MG/EG
-mob_w_mg:   db 0, 0, 4, 5, 2, 1, 0    ; index = typ figury
-mob_w_eg:   db 0, 0, 4, 5, 4, 2, 0
+; indexy: 0=prazdne,1=pesiak,2=jazdec,3=strelec,4=veza,5=dama,6=kral
+mob_w_mg:   db 0, 0, 5, 5, 3, 1, 0
+mob_w_eg:   db 0, 0, 5, 5, 5, 3, 0
+
+; baseline mobility (pod tento pocet je figura stiesnena -> penal)
+mob_base_mg: db 0, 0, 4, 7, 7, 14, 0
+mob_base_eg: db 0, 0, 4, 7, 8, 14, 0
+
+; king tropism: vaha za figuru blizko krala (distance <= 2)
+; indexy 0..6: prazdne,pesiak,jazdec,strelec,veza,dama,kral
+tropism_weights: db 0, 0, 2, 2, 3, 5, 0
+TROPISM_SCALE  equ 3    ; multiplikator penalty
 
 ; king safety (iba MG)
-SHIELD_PAWN    equ 0    ; pesiak v suprade pred kralom
-KINGOPEN_PEN   equ 0    ; otvoreny file pri kralovi (ziadny pesiak)
-KINGSEMI_PEN   equ 0     ; semi-otvoreny vlastnymi (vlastny chyba)
+SHIELD_PAWN    equ 12   ; pesiak v suprade pred kralom
+KINGOPEN_PEN   equ 35   ; otvoreny file pri kralovi (ziadny pesiak)
+KINGSEMI_PEN   equ 18   ; semi-otvoreny vlastnymi (vlastny chyba)
+CASTLE_SHELTER_BONUS equ 8   ; pesiak na f/g/h pred rošádovaným kráľom
+CASTLE_SHELTER_MISS  equ 12  ; chýbajúci pesiak v castled shelteri
 
 ; jazdec na outposte (MG/EG), centralne file 2..5 viac
-OUTPOST_MG     equ 0
-OUTPOST_EG     equ 0
-OUTPOST_C_MG   equ 0
-OUTPOST_C_EG   equ 0
+OUTPOST_MG     equ 15
+OUTPOST_EG     equ 8
+OUTPOST_C_MG   equ 25
+OUTPOST_C_EG   equ 10
+
+
 
 section .text
 
@@ -401,7 +416,7 @@ eval_knight_outpost:
 evaluate:
     push rbp
     mov rbp, rsp
-    sub rsp, 80
+    sub rsp, 112
     push rbx
     push r12
     push r13
@@ -421,6 +436,10 @@ evaluate:
     ; [rbp-56] = faza hry (dword, max 24)
     ; [rbp-64] = policko bieleho krala (dword)
     ; [rbp-68] = policko cierneho krala (dword)
+    ; [rbp-72] = king attack score pre bieleho (utok na cierneho krala) (dword)
+    ; [rbp-76] = king attack score pre cierneho (utok na bieleho krala) (dword)
+    ; [rbp-88] = passed white pawn bitmask (qword)  — POZOR: -80 by sa prekryvalo s -76!
+    ; [rbp-96] = passed black pawn bitmask (qword)
     xor eax, eax
     mov [rbp - 8], rax
     mov [rbp - 16], rax
@@ -431,6 +450,10 @@ evaluate:
     mov [rbp - 56], rax
     mov [rbp - 64], rax
     mov [rbp - 68], rax
+    mov dword [rbp - 72], 0
+    mov dword [rbp - 76], 0
+    mov qword [rbp - 88], 0    ; passed white mask (nie -80 — prekryv s -76!)
+    mov qword [rbp - 96], 0    ; passed black mask
 
     xor r15d, r15d          ; MG akumulator
     xor r12, r12            ; index policka
@@ -552,6 +575,7 @@ evaluate:
     cmp r14d, ROOK
     je .mob_r
     ; dama: diagonalne + rovne
+    xor ecx, ecx
     MOB_WALK  1,  1, 1
     MOB_WALK  1, -1, 1
     MOB_WALK -1,  1, 1
@@ -562,12 +586,14 @@ evaluate:
     MOB_WALK  0, -1, 1
     jmp .mob_score
 .mob_b:
+    xor ecx, ecx
     MOB_WALK  1,  1, 1
     MOB_WALK  1, -1, 1
     MOB_WALK -1,  1, 1
     MOB_WALK -1, -1, 1
     jmp .mob_score
 .mob_r:
+    xor ecx, ecx
     MOB_WALK  1,  0, 1
     MOB_WALK -1,  0, 1
     MOB_WALK  0,  1, 1
@@ -610,12 +636,25 @@ evaluate:
     MOB_WALK -2,  1, 0
     MOB_WALK -1,  2, 0
 .mob_score:
+    mov r11d, ecx
+
+    ; MG mobility: w * (count - baseline)
+    mov eax, r11d
+    lea rsi, [mob_base_mg]
+    movzx edi, byte [rsi + r14]
+    sub eax, edi
     lea rsi, [mob_w_mg]
-    movzx eax, byte [rsi + r14]
-    imul eax, ecx
+    movzx edi, byte [rsi + r14]
+    imul eax, edi
+
+    ; EG mobility: w * (count - baseline)
+    mov edx, r11d
+    lea rsi, [mob_base_eg]
+    movzx edi, byte [rsi + r14]
+    sub edx, edi
     lea rsi, [mob_w_eg]
-    movzx edx, byte [rsi + r14]
-    imul edx, ecx
+    movzx edi, byte [rsi + r14]
+    imul edx, edi
     test r13d, r13d
     jz .mob_w
     sub r15d, eax
@@ -741,6 +780,160 @@ evaluate:
     jmp .ks_b_fx_loop
 .ks_b_done:
 
+    ; castled shelter (MG): krale na f/g/h1 resp. f/g/h8
+    ; ciel: silnejsie trestat oslabenie rošádovej bariéry (hlavne g/h push)
+    ; --- biely castled king (f1/g1/h1) ---
+    mov eax, [rbp - 64]
+    cmp eax, 5                  ; f1
+    je .ks_wc_apply
+    cmp eax, 6                  ; g1
+    je .ks_wc_apply
+    cmp eax, 7                  ; h1
+    jne .ks_bc_check
+.ks_wc_apply:
+    ; f2 = 13, g2 = 14, h2 = 15
+    movzx ecx, byte [rbx + 13]
+    cmp ecx, PAWN | WHITE
+    je .ks_wc_f_ok
+    sub r15d, CASTLE_SHELTER_MISS
+    jmp .ks_wc_g
+.ks_wc_f_ok:
+    add r15d, CASTLE_SHELTER_BONUS
+.ks_wc_g:
+    movzx ecx, byte [rbx + 14]
+    cmp ecx, PAWN | WHITE
+    je .ks_wc_g_ok
+    sub r15d, CASTLE_SHELTER_MISS
+    jmp .ks_wc_h
+.ks_wc_g_ok:
+    add r15d, CASTLE_SHELTER_BONUS
+.ks_wc_h:
+    movzx ecx, byte [rbx + 15]
+    cmp ecx, PAWN | WHITE
+    je .ks_wc_h_ok
+    sub r15d, CASTLE_SHELTER_MISS
+    jmp .ks_bc_check
+.ks_wc_h_ok:
+    add r15d, CASTLE_SHELTER_BONUS
+
+    ; --- cierny castled king (f8/g8/h8) ---
+.ks_bc_check:
+    mov eax, [rbp - 68]
+    cmp eax, 61                 ; f8
+    je .ks_bc_apply
+    cmp eax, 62                 ; g8
+    je .ks_bc_apply
+    cmp eax, 63                 ; h8
+    jne .ks_castle_done
+.ks_bc_apply:
+    ; f7 = 53, g7 = 54, h7 = 55
+    movzx ecx, byte [rbx + 53]
+    cmp ecx, PAWN | BLACK
+    je .ks_bc_f_ok
+    add r15d, CASTLE_SHELTER_MISS
+    jmp .ks_bc_g
+.ks_bc_f_ok:
+    sub r15d, CASTLE_SHELTER_BONUS
+.ks_bc_g:
+    movzx ecx, byte [rbx + 54]
+    cmp ecx, PAWN | BLACK
+    je .ks_bc_g_ok
+    add r15d, CASTLE_SHELTER_MISS
+    jmp .ks_bc_h
+.ks_bc_g_ok:
+    sub r15d, CASTLE_SHELTER_BONUS
+.ks_bc_h:
+    movzx ecx, byte [rbx + 55]
+    cmp ecx, PAWN | BLACK
+    je .ks_bc_h_ok
+    add r15d, CASTLE_SHELTER_MISS
+    jmp .ks_castle_done
+.ks_bc_h_ok:
+    sub r15d, CASTLE_SHELTER_BONUS
+.ks_castle_done:
+
+    ; ================= KING TROPISM (MG only) =================
+    ; Pre kazdu nePesiacku nKralovsku figuru: Chebyshev <= 2 od nepriatelovho krala
+    ; biela figura -> utok na cierneho krala ([rbp-68]); cierna -> na bieleho ([rbp-64])
+    lea rsi, [board]
+    xor r12, r12
+.trop_loop:
+    movzx eax, byte [rsi + r12]
+    test eax, eax
+    jz .trop_next
+    mov r13d, eax
+    and r13d, COLOR_MASK
+    mov r14d, eax
+    and r14d, PIECE_MASK
+    cmp r14d, PAWN
+    je .trop_next
+    cmp r14d, KING
+    je .trop_next
+    ; vybrat cieloveho krala
+    test r13d, r13d
+    jnz .trop_is_black
+    mov ebx, [rbp - 68]         ; cierna figura: biely utocnik -> cierne kralov sq
+    jmp .trop_dist
+.trop_is_black:
+    mov ebx, [rbp - 64]         ; cierna figura -> biely kral
+.trop_dist:
+    ; file distance
+    mov ecx, r12d
+    and ecx, 7
+    mov edx, ebx
+    and edx, 7
+    sub ecx, edx
+    test ecx, ecx
+    jns .trop_fok
+    neg ecx
+.trop_fok:
+    ; rank distance
+    mov r8d, r12d
+    shr r8d, 3
+    mov r9d, ebx
+    shr r9d, 3
+    sub r8d, r9d
+    test r8d, r8d
+    jns .trop_rok
+    neg r8d
+.trop_rok:
+    ; chebyshev = max
+    cmp ecx, r8d
+    jge .trop_cheb
+    mov ecx, r8d
+.trop_cheb:
+    cmp ecx, 2
+    jg .trop_next
+    lea rdi, [tropism_weights]
+    movzx r10d, byte [rdi + r14]
+    test r13d, r13d
+    jnz .trop_acc_black
+    add dword [rbp - 72], r10d  ; biely utoci na cierneho krala
+    jmp .trop_next
+.trop_acc_black:
+    add dword [rbp - 76], r10d  ; cierny utoci na bieleho krala
+.trop_next:
+    inc r12
+    cmp r12, 64
+    jl .trop_loop
+
+    ; aplikovat: cap na 16, * TROPISM_SCALE, len v MG
+    mov eax, [rbp - 72]
+    cmp eax, 16
+    jle .trop_w_cap
+    mov eax, 16
+.trop_w_cap:
+    imul eax, eax, TROPISM_SCALE
+    add r15d, eax               ; biely profituje
+
+    mov eax, [rbp - 76]
+    cmp eax, 16
+    jle .trop_b_cap
+    mov eax, 16
+.trop_b_cap:
+    imul eax, eax, TROPISM_SCALE
+    sub r15d, eax               ; cierny profituje (penalty pre bieleho)
+
     ; DEBUG dump
     mov [eval_dbg_mg], r15d
     mov eax, [rbp - 48]
@@ -856,6 +1049,7 @@ evaluate:
     and rdi, [rbp - 16]
     jnz .pp_w_loop
     ; passed: bonus = PASSED_BASE + PASSED_STEP * rank
+    bts qword [rbp - 88], rdx   ; zaznac bieleho passera
     imul ecx, ecx, PASSED_STEP
     add ecx, PASSED_BASE
     add r15d, ecx
@@ -891,6 +1085,7 @@ evaluate:
     jnz .pp_b_loop
     ; passed: bonus = PASSED_BASE + PASSED_STEP * (7 - rank); rcx = rank
     ; pozor: nepouzivat eax/rax - v rax je maska ciernych pesiacov!
+    bts qword [rbp - 96], rdx   ; zaznac cierneho passera
     mov edx, 7
     sub edx, ecx
     imul edx, edx, PASSED_STEP
@@ -950,13 +1145,51 @@ evaluate:
     test r13d, r13d
     jnz .rook_rank_b
     cmp eax, 6
-    jne .rook_next
+    jne .rook_behind_w
     add r15d, ROOK_SEVENTH
-    jmp .rook_next
+    jmp .rook_behind_w
 .rook_rank_b:
     cmp eax, 1
-    jne .rook_next
+    jne .rook_behind_b
     sub r15d, ROOK_SEVENTH
+    jmp .rook_behind_b
+
+.rook_behind_w:
+    ; rook behind passed pawn (biely): veza je na rovnakom file, nizsi rank ako passer
+    ; file mask = rdi (uz vypocitana ako jednofile mask v rbx*8)
+    lea rsi, [file_masks]
+    mov rdi, [rsi + rbx*8]     ; rbx = file of rook
+    test r13d, r13d
+    jnz .rook_behind_b          ; len biela veza
+    mov rax, [rbp - 88]         ; passed white bitmask
+    and rax, rdi                ; biely passer na rovnakom file?
+    jz .rook_next
+    bsf rcx, rax                ; najdi passera
+    mov edx, ecx
+    shr edx, 3                  ; rank passera
+    mov eax, r12d
+    shr eax, 3                  ; rank vezy
+    cmp eax, edx                ; veza musi byt NIZSSIE ako passer
+    jge .rook_next
+    add r15d, ROOK_BEHIND_PP
+    jmp .rook_next
+.rook_behind_b:
+    ; cierna veza za ciernym passerom: veza je na rovnakom file, VYSSI rank ako passer
+    test r13d, r13d
+    jz .rook_next               ; len cierna veza
+    lea rsi, [file_masks]
+    mov rdi, [rsi + rbx*8]
+    mov rax, [rbp - 96]         ; passed black bitmask
+    and rax, rdi
+    jz .rook_next
+    bsf rcx, rax
+    mov edx, ecx
+    shr edx, 3
+    mov eax, r12d
+    shr eax, 3
+    cmp eax, edx
+    jle .rook_next              ; veza musi byt VYSSSIE (vacsi rank) ako passer
+    sub r15d, ROOK_BEHIND_PP
 .rook_next:
     inc r12
     cmp r12, 64

@@ -23,6 +23,7 @@ extern piece_chars
 extern is_in_check, generate_all_moves, square_to_str, square_str_buf
 
 global pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
+global pgn_san_buf, pgn_san_len
 
 section .data
 

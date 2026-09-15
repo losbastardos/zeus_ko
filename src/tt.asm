@@ -25,9 +25,9 @@ tt_fallback: resb 1048576    ; 1MB fallback ked mmap zlyha
 
 section .text
 
-global tt_init, tt_clear, tt_probe, tt_store
+global tt_init, tt_clear, tt_probe, tt_store, lmr_reduction
 
-extern tt_base, tt_bytes, tt_mask
+extern tt_base, tt_bytes, tt_mask, lmr_table
 
 ; ============================================================
 ; tt_init - alokuje TT podla velkosti v MB
@@ -238,4 +238,62 @@ tt_store:
     pop r11
     pop r10
     pop r9
+    ret
+
+; ============================================================
+; lmr_reduction - vrati redukciu pre Late Move Reduction
+; Vstup: rdi = depth, rsi = move index, rdx = improving flag
+; Vystup: eax = reduction (ply)
+; LMR log formula: reduction = log(depth) * log(index) / divisor
+; s prubeznymi parametrami based na improving flag
+; ============================================================
+lmr_reduction:
+    ; log tabulka: log2(x)*4 pre x=1..64 (indexovane 0..63, [0]=0)
+    ; pre depth 1-16, index 0-15
+    ; formula z Stockfish: (82 + 20*log(d)) * log(i) / (192*c) kde c=1 normally, 1.4 improving
+    ; tu: redukcia(d,i,imp) ≈ log(d)*log(i)/16 - adjustment podľa improving
+    ; zjednosusevane: tabulka 16x16 s hodnotami reduction
+    push rbx
+    push rcx
+    push rdx
+    push r8
+    
+    ; minimalne redukcie podľa literatury (Stockfish)
+    ; redukcie su indexovane [depth-1][index] pre depth 1-16, index 0-15
+    ; pre depth>=5, index>=2
+    xor eax, eax
+    cmp rdi, 2
+    jle .lmr_done          ; depth <= 2: bez redukcie
+    cmp rsi, 1
+    jle .lmr_done          ; index <= 1: bez redukcie
+    cmp rdi, 16
+    jg .lmr_capped         ; depth > 16: clamp na 16
+    mov r8, rdi
+    jmp .lmr_depth_ok
+.lmr_capped:
+    mov r8, 16
+.lmr_depth_ok:
+    cmp rsi, 16
+    jl .lmr_index_ok
+    mov rsi, 16
+.lmr_index_ok:
+    
+    ; tabulka LMR redukcie: lookup [depth-1][index]
+    lea rcx, [lmr_table]
+    mov eax, r8d
+    dec eax
+    imul eax, 16
+    lea rax, [rcx + rax]     ; offset do riadku
+    movzx eax, byte [rax + rsi]  ; eax = base redukcia z tabulky
+    
+    ; adjustment: ako nie je improving (rdx=0), +1 redukcia
+    test rdx, rdx
+    jnz .lmr_done
+    inc eax
+    
+.lmr_done:
+    pop r8
+    pop rdx
+    pop rcx
+    pop rbx
     ret

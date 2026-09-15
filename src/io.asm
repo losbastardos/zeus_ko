@@ -160,6 +160,12 @@ read_move:
     je .check_new
     cmp al, 'u'
     je .check_uci
+    cmp al, 'a'
+    je .check_analyze
+    cmp al, 's'
+    je .check_suite
+    cmp al, 'b'
+    je .check_bench
 
 .validate_move:
     cmp r12, 4
@@ -294,6 +300,56 @@ read_move:
     cmp byte [move_buf+2], 'i'
     jne .invalid
     mov rax, 5
+    jmp .done
+
+.check_analyze:
+    cmp r12, 8
+    jl .validate_move
+    cmp byte [move_buf+1], 'n'
+    jne .validate_move
+    cmp byte [move_buf+2], 'a'
+    jne .validate_move
+    cmp byte [move_buf+3], 'l'
+    jne .validate_move
+    cmp byte [move_buf+4], 'y'
+    jne .validate_move
+    cmp byte [move_buf+5], 'z'
+    jne .validate_move
+    cmp byte [move_buf+6], 'e'
+    jne .validate_move
+    cmp byte [move_buf+7], ' '
+    jne .validate_move
+    mov rax, 6
+    jmp .done
+
+.check_suite:
+    cmp r12, 6
+    jl .validate_move
+    cmp byte [move_buf+1], 'u'
+    jne .validate_move
+    cmp byte [move_buf+2], 'i'
+    jne .validate_move
+    cmp byte [move_buf+3], 't'
+    jne .validate_move
+    cmp byte [move_buf+4], 'e'
+    jne .validate_move
+    cmp byte [move_buf+5], ' '
+    jne .validate_move
+    mov rax, 7
+    jmp .done
+
+.check_bench:
+    cmp r12, 5
+    jne .validate_move
+    cmp byte [move_buf+1], 'e'
+    jne .validate_move
+    cmp byte [move_buf+2], 'n'
+    jne .validate_move
+    cmp byte [move_buf+3], 'c'
+    jne .validate_move
+    cmp byte [move_buf+4], 'h'
+    jne .validate_move
+    mov rax, 8
     jmp .done
 
 .check_go:
