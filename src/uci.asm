@@ -14,6 +14,7 @@ DEFAULT REL
 section .data
 
 global uci_id_name, uci_id_author, uci_ok, uci_ready, uci_bestmove, uci_unknown
+global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_overhead
 
 %defstr BUILD_DATE_STR BUILD_DATE
 
@@ -28,6 +29,12 @@ uci_id_author_len equ $ - uci_id_author - 1
 uci_ok:
     db "uciok", 10, 0
 uci_ok_len equ $ - uci_ok - 1
+
+uci_opt_hash:    db "option name Hash type spin default 64 min 16 max 1024", 10, 0
+uci_opt_ownbook: db "option name OwnBook type check default true", 10, 0
+uci_opt_ponder:  db "option name Ponder type check default false", 10, 0
+uci_opt_syzygy:  db "option name SyzygyPath type string default <empty>", 10, 0
+uci_opt_overhead: db "option name MoveOverhead type spin default 100 min 0 max 10000", 10, 0
 
 uci_ready:
     db "readyok", 10, 0
@@ -77,7 +84,7 @@ INPUT_PEND_SIZE equ 512
 
 section .text
 
-global uci_loop, write_cstr, search_poll_input
+global uci_loop, write_cstr, search_poll_input, uci_now_ms
 
 extern init_board, init_hash_history, record_hash, clear_history
 extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit
@@ -87,13 +94,14 @@ extern tt_init
 extern parse_fen_string, parse_int
 extern board, side, move_buf, move_buf_len, move_list, move_count, search_depth
 extern position_hash, square_str_buf
-extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size
+extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
 extern tb_init, tb_path, tb_path_len
+extern suite_cmd_uci
 
 ; ============================================================
 ; write_str - vypise C-string na stdout
@@ -689,6 +697,13 @@ uci_setoption:
     test rax, rax
     jnz .opt_syzygypath
 
+    mov rdi, r13
+    mov rsi, r14
+    lea rdx, [rel .str_moveoverhead]
+    call uci_str_eq
+    test rax, rax
+    jnz .opt_moveoverhead
+
     jmp .done
 
 .opt_hash:
@@ -771,6 +786,21 @@ uci_setoption:
     call tb_init            ; rdi uz ukazuje na ulozenu cestu
     jmp .done
 
+.opt_moveoverhead:
+    mov rdi, r15
+    mov rsi, rbx
+    call uci_parse_int
+    test eax, eax
+    jl .overhead_min
+    cmp eax, 10000
+    jle .overhead_store
+    mov eax, 10000
+.overhead_min:
+    xor eax, eax
+.overhead_store:
+    mov [uci_move_overhead], eax
+    jmp .done
+
 .done:
     pop r15
     pop r14
@@ -783,6 +813,7 @@ uci_setoption:
 .str_ownbook:  db "OwnBook", 0
 .str_ponder:   db "Ponder", 0
 .str_syzygypath: db "SyzygyPath", 0
+.str_moveoverhead: db "MoveOverhead", 0
 .str_true:     db "true", 0
 .str_false:    db "false", 0
 
@@ -869,9 +900,15 @@ uci_alloc_time:
     jnz .alloc_store
     mov rax, 50
 .alloc_store:
-    mov [search_limits + 56], rax        ; soft = base
+    ; odcitaj move overhead od soft/hard limitu
+    mov r9d, [uci_move_overhead]
+    sub rax, r9
+    jg .soft_ok
+    mov rax, 10
+.soft_ok:
+    mov [search_limits + 56], rax        ; soft = base - overhead
     mov rcx, rax
-    shr rcx, 1                           ; base/2 rezerva na dobehnutie iteracie
+    shr rcx, 1
     add rcx, rax
     mov [search_limits + 64], rcx        ; hard = base + base/2
     ret
@@ -1947,6 +1984,22 @@ uci_loop:
     test rax, rax
     jnz .ponderhit
 
+    ; 'analyze' (non-standard helper)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_analyze]
+    call uci_str_eq
+    test rax, rax
+    jnz .analyze
+
+    ; 'suite' (non-standard helper)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_suite]
+    call uci_str_eq
+    test rax, rax
+    jnz .suite
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
@@ -1962,6 +2015,16 @@ uci_loop:
     lea rdi, [uci_id_name]
     call write_cstr
     lea rdi, [uci_id_author]
+    call write_cstr
+    lea rdi, [uci_opt_hash]
+    call write_cstr
+    lea rdi, [uci_opt_ownbook]
+    call write_cstr
+    lea rdi, [uci_opt_ponder]
+    call write_cstr
+    lea rdi, [uci_opt_syzygy]
+    call write_cstr
+    lea rdi, [uci_opt_overhead]
     call write_cstr
     lea rdi, [uci_ok]
     call write_cstr
@@ -2000,6 +2063,14 @@ uci_loop:
     mov byte [uci_ponder], 0
     jmp .loop
 
+.analyze:
+    call suite_cmd_uci
+    jmp .loop
+
+.suite:
+    call suite_cmd_uci
+    jmp .loop
+
 .done:
     call pgn_quit             ; uzavrie partiu a zavrie games.pgn
     pop r12
@@ -2015,3 +2086,5 @@ uci_loop:
 .str_ucinewgame: db "ucinewgame", 0
 .str_stop:    db "stop", 0
 .str_ponderhit: db "ponderhit", 0
+.str_analyze: db "analyze", 0
+.str_suite:   db "suite", 0

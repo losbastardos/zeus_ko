@@ -1,0 +1,6 @@
+# Smoke EPD suite for analyze tool
+# Format: FEN + EPD operations, must include bm.
+
+6k1/7Q/6K1/8/8/8/8/8 w - - bm Qh8#; id "mate1_qh8";
+6k1/5Q2/6K1/8/8/8/8/8 w - - bm Qg7#; id "mate1_qg7";
+6k1/8/6K1/8/8/8/5q2/7k b - - bm Qg2#; id "mate1_qg2";

@@ -1,0 +1,5 @@
+# bf.pgn critical black-to-move positions (Zeus mistakes)
+# format: FEN | expected bestmove(s)
+r2q1rk1/2p2ppp/p1n1b3/1pbpP3/4n3/2P2N2/PPBN1PPP/R1BQ1RK1 b - - 4 11 | e6f5
+r2q1rk1/2p2ppp/pb2b3/1p2N3/4B3/2P5/PP3PPP/R1BQ1RK1 b - - 0 14 | b6f2
+6k1/2B3pp/p1P2p2/1p6/8/2P2P2/P5PP/4RRK1 b - - 0 30 | g8f7
