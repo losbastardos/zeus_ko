@@ -14,7 +14,7 @@ DEFAULT REL
 section .data
 
 global uci_id_name, uci_id_author, uci_ok, uci_ready, uci_bestmove, uci_unknown
-global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_overhead
+global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead
 
 %defstr BUILD_DATE_STR BUILD_DATE
 
@@ -34,6 +34,7 @@ uci_opt_hash:    db "option name Hash type spin default 64 min 16 max 1024", 10,
 uci_opt_ownbook: db "option name OwnBook type check default true", 10, 0
 uci_opt_ponder:  db "option name Ponder type check default false", 10, 0
 uci_opt_syzygy:  db "option name SyzygyPath type string default <empty>", 10, 0
+uci_opt_syzygy_depth: db "option name SyzygyProbeDepth type spin default 1 min 0 max 64", 10, 0
 uci_opt_overhead: db "option name MoveOverhead type spin default 100 min 0 max 10000", 10, 0
 
 uci_ready:
@@ -47,6 +48,10 @@ uci_bestmove_len equ $ - uci_bestmove - 1
 uci_unknown:
     db "info string neznamy prikaz", 10, 0
 uci_unknown_len equ $ - uci_unknown - 1
+
+uci_tbtest_prefix: db "info string tbtest pieces=", 0
+uci_tbtest_wdl:    db " wdl=", 0
+uci_tbtest_map:    db " map_bytes=", 0
 
 uci_log_name:      db "uci_debug.log", 0
 uci_log_start:     db "=== Zeus_KO ", BUILD_DATE_STR, " start ===", 10
@@ -94,13 +99,13 @@ extern tt_init
 extern parse_fen_string, parse_int
 extern board, side, move_buf, move_buf_len, move_list, move_count, search_depth
 extern position_hash, square_str_buf
-extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead
+extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
-extern tb_init, tb_path, tb_path_len
+extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_piece_count, tb_map_size
 extern suite_cmd_uci
 
 ; ============================================================
@@ -662,11 +667,18 @@ uci_setoption:
     mov rdi, r12
     call uci_token
     cmp rax, -1
-    je .done
+    je .value_missing
     test rbx, rbx
-    jz .done
+    jz .value_missing
     mov r15, rax          ; start hodnoty
-    ; rbx = dlzka hodnoty
+    jmp .value_ready
+
+.value_missing:
+    mov r15, [move_buf_len] ; prazdna hodnota (napr. SyzygyPath reset)
+    xor ebx, ebx
+
+.value_ready:
+    ; rbx = dlzka hodnoty (0 pri prazdnej hodnote)
 
     ; porovnaj id
     mov rdi, r13
@@ -696,6 +708,13 @@ uci_setoption:
     call uci_str_eq
     test rax, rax
     jnz .opt_syzygypath
+
+    mov rdi, r13
+    mov rsi, r14
+    lea rdx, [rel .str_syzygyprobedepth]
+    call uci_str_eq
+    test rax, rax
+    jnz .opt_syzygyprobedepth
 
     mov rdi, r13
     mov rsi, r14
@@ -762,28 +781,99 @@ uci_setoption:
     jmp .done
 
 .opt_syzygypath:
-    ; r15 = start hodnoty, rbx = dlzka hodnoty
-    test rbx, rbx
-    jz .done                ; chybajuca/prazdna hodnota - ignoruj
-    cmp rbx, 255
+    ; SyzygyPath: ber celu hodnotu az do konca riadku (mozu byt medzery v ceste)
+    ; r15 = start prveho tokenu hodnoty; [move_buf_len] = koniec vstupneho riadku
+    mov rcx, [move_buf_len]
+    cmp r15, rcx
+    jae .tb_clear
+    sub rcx, r15
+    jmp .tb_trim_tail
+
+.tb_clear:
+    lea rdi, [tb_path]
+    mov byte [rdi], 0
+    mov qword [tb_path_len], 0
+    call tb_init
+    jmp .done
+
+.tb_trim_tail:
+    test rcx, rcx
+    jz .tb_copy_ready
+    movzx eax, byte [move_buf + r15 + rcx - 1]
+    cmp al, ' '
+    je .tb_trim_dec
+    cmp al, 9
+    je .tb_trim_dec
+    cmp al, 10
+    je .tb_trim_dec
+    cmp al, 13
+    je .tb_trim_dec
+    jmp .tb_copy_ready
+.tb_trim_dec:
+    dec rcx
+    jmp .tb_trim_tail
+
+.tb_copy_ready:
+    ; specialna hodnota "<empty>" vypne TB cestu
+    cmp rcx, 7
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 0]
+    cmp al, '<'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 1]
+    cmp al, 'e'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 2]
+    cmp al, 'm'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 3]
+    cmp al, 'p'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 4]
+    cmp al, 't'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 5]
+    cmp al, 'y'
+    jne .tb_len_cap
+    movzx eax, byte [move_buf + r15 + 6]
+    cmp al, '>'
+    jne .tb_len_cap
+    jmp .tb_clear
+
+.tb_len_cap:
+    cmp rcx, 255
     jbe .tb_len_ok
-    mov rbx, 255            ; bezpecna truncat na max 255 znakov
+    mov rcx, 255            ; bezpecna truncat na max 255 znakov
 .tb_len_ok:
-    lea rsi, [move_buf]
-    add rsi, r15            ; zdroj: token v move_buf
-    lea rdi, [tb_path]      ; ciel: interny buffer tb.asm
-    xor ecx, ecx
+    lea rsi, [move_buf + r15] ; zdroj: hodnota v move_buf
+    lea rdi, [tb_path]         ; ciel: interny buffer tb.asm
+    xor r8, r8
 .tb_copy:
-    cmp rcx, rbx
+    cmp r8, rcx
     jae .tb_term
-    movzx eax, byte [rsi + rcx]
-    mov [rdi + rcx], al
-    inc rcx
+    movzx eax, byte [rsi + r8]
+    mov [rdi + r8], al
+    inc r8
     jmp .tb_copy
 .tb_term:
-    mov byte [rdi + rcx], 0
-    mov [tb_path_len], rcx
-    call tb_init            ; rdi uz ukazuje na ulozenu cestu
+    mov byte [rdi + r8], 0
+    mov [tb_path_len], r8
+    call tb_init            ; rdi ukazuje na ulozenu cestu
+    jmp .done
+
+.opt_syzygyprobedepth:
+    mov rdi, r15
+    mov rsi, rbx
+    call uci_parse_int
+    test eax, eax
+    jge .syzygy_depth_min_ok
+    xor eax, eax
+.syzygy_depth_min_ok:
+    cmp eax, 64
+    jle .syzygy_depth_store
+    mov eax, 64
+.syzygy_depth_store:
+    mov [uci_syzygy_probe_depth], eax
     jmp .done
 
 .opt_moveoverhead:
@@ -813,6 +903,7 @@ uci_setoption:
 .str_ownbook:  db "OwnBook", 0
 .str_ponder:   db "Ponder", 0
 .str_syzygypath: db "SyzygyPath", 0
+.str_syzygyprobedepth: db "SyzygyProbeDepth", 0
 .str_moveoverhead: db "MoveOverhead", 0
 .str_true:     db "true", 0
 .str_false:    db "false", 0
@@ -2000,6 +2091,14 @@ uci_loop:
     test rax, rax
     jnz .suite
 
+    ; 'tbtest' (non-standard helper)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_tbtest]
+    call uci_str_eq
+    test rax, rax
+    jnz .tbtest
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
@@ -2023,6 +2122,8 @@ uci_loop:
     lea rdi, [uci_opt_ponder]
     call write_cstr
     lea rdi, [uci_opt_syzygy]
+    call write_cstr
+    lea rdi, [uci_opt_syzygy_depth]
     call write_cstr
     lea rdi, [uci_opt_overhead]
     call write_cstr
@@ -2071,6 +2172,29 @@ uci_loop:
     call suite_cmd_uci
     jmp .loop
 
+.tbtest:
+    call tb_piece_count
+    mov r12, rax
+    call tb_probe_wdl
+    mov rbx, rax
+
+    lea rdi, [uci_tbtest_prefix]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    lea rdi, [uci_tbtest_wdl]
+    call write_cstr
+    mov rax, rbx
+    call print_number
+    lea rdi, [uci_tbtest_map]
+    call write_cstr
+    mov rax, [tb_map_size]
+    call print_number
+    lea rdi, [msg_newline]
+    mov rdx, 1
+    call write_str
+    jmp .loop
+
 .done:
     call pgn_quit             ; uzavrie partiu a zavrie games.pgn
     pop r12
@@ -2088,3 +2212,4 @@ uci_loop:
 .str_ponderhit: db "ponderhit", 0
 .str_analyze: db "analyze", 0
 .str_suite:   db "suite", 0
+.str_tbtest:  db "tbtest", 0
