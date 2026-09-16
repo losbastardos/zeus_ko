@@ -888,7 +888,7 @@ negamax:
     ; Ak fail-high -> prune (tento uzol presiahne beta aj v plnom searchi).
     ; PROBCUT_MARGIN = 200 cps (Stockfish-like hodnota)
 %define PROBCUT_MARGIN 200
-    cmp qword [rbp - 8], 5
+    cmp qword [rbp - 8], 100
     jl .probcut_done
     cmp dword [rbp - 44], 0         ; !in_check
     jne .probcut_done
