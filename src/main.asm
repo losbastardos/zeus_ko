@@ -134,6 +134,10 @@ menu_invalid_1_6_en:
     db 27,"[31mInvalid choice. Enter 1-6 or ELO number.",27,"[0m",10
 menu_invalid_1_6_en_len equ $ - menu_invalid_1_6_en
 
+tbtest_prefix:      db "TBTEST pieces=", 0
+tbtest_wdl_prefix:  db "TBTEST wdl=", 0
+tbtest_map_prefix:  db "TBTEST map_bytes=", 0
+
 section .text
 global _start
 
@@ -154,7 +158,7 @@ extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
 extern bench_fens, bench_fens_count
 extern bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
 extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
-extern key_language, default_language
+extern key_language, default_language, key_syzygy, default_syzygy
 extern lang_file_en, lang_file_sk
 extern lkey_menu_title, ldef_menu_title
 extern lkey_menu_select, ldef_menu_select
@@ -221,16 +225,17 @@ extern msg_new_game, msg_new_game_len
 extern msg_view_white, msg_view_white_len
 extern write_cstr
 extern uci_id_name, uci_id_author, uci_ok
-extern uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_overhead
+extern uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead
 extern msg_view_black, msg_view_black_len
 extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmove, engine_side, uci_requested
 extern gfx_active_backend
 extern lang_is_en
-extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead
+extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
 extern tt_init
 extern parse_fen_string, uci_now_ms
 extern nodes_searched
 extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
+extern tb_init, tb_probe_wdl, tb_piece_count, tb_map_size
 
 %define SYS_GETPID 39
 
@@ -901,6 +906,7 @@ _start:
     mov byte [uci_stop_flag], 0
     mov dword [uci_hash_size], 64
     mov dword [uci_move_overhead], 100
+    mov dword [uci_syzygy_probe_depth], 1
     mov rdi, 64
     call tt_init
 
@@ -927,6 +933,13 @@ _start:
     mov byte [lang_is_en], 1
 .lang_done:
     call load_language_texts
+
+    ; Syzygy TB cesta (volitelne; prazdny string = bez TB)
+    lea rdi, [key_syzygy]
+    lea rsi, [default_syzygy]
+    call config_get
+    mov rdi, rax
+    call tb_init
 
     ; nacitaj search depth
     lea rdi, [key_search_depth]
@@ -1065,7 +1078,7 @@ _start:
     cmp al, 'g'
     je .check_g_cmd
     cmp al, 't'
-    je .do_text
+    je .check_t_cmd
 
 .try_move:
     call parse_user_move
@@ -1247,6 +1260,47 @@ _start:
     jne .try_move
     jmp .do_go
 
+.check_t_cmd:
+    cmp qword [move_buf_len], 6
+    jne .do_text
+    cmp byte [move_buf+1], 'b'
+    jne .do_text
+    cmp byte [move_buf+2], 't'
+    jne .do_text
+    cmp byte [move_buf+3], 'e'
+    jne .do_text
+    cmp byte [move_buf+4], 's'
+    jne .do_text
+    cmp byte [move_buf+5], 't'
+    jne .do_text
+    jmp .do_tbtest
+
+.do_tbtest:
+    call tb_piece_count
+    mov r12, rax
+    call tb_probe_wdl
+    mov r13, rax
+    mov r14, [tb_map_size]
+
+    lea rdi, [tbtest_prefix]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_prefix]
+    call write_cstr
+    mov rax, r13
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_map_prefix]
+    call write_cstr
+    mov rax, r14
+    call print_number
+    call print_newline
+    jmp .game_loop
+
 .do_gfx:
     cmp byte [move_buf+1], 'f'
     jne .illegal
@@ -1315,6 +1369,8 @@ _start:
     lea rdi, [uci_opt_ponder]
     call write_cstr
     lea rdi, [uci_opt_syzygy]
+    call write_cstr
+    lea rdi, [uci_opt_syzygy_depth]
     call write_cstr
     lea rdi, [uci_opt_overhead]
     call write_cstr
