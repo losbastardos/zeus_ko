@@ -26,8 +26,12 @@ LDFLAGS_BIN ?= -Wl,--dynamic-linker=$(DYN_LINKER)
 
 NASMFLAGS   = -f elf64 -I $(SRCDIR)/ -DBUILD_DATE=$(BUILD_DATE)
 BUILD_DATE := $(shell date +%Y%m%d)
+EXTRA_DEFINES ?=
+COMMANDS_DEBUG_LOG ?= commands_debug.log
+COMMANDS_DEBUG ?= $(shell awk -F= 'tolower($$1) ~ /^[[:space:]]*debug[[:space:]]*$$/ {v=tolower($$2); gsub(/[[:space:]]/,"",v); print (v ~ /^(1|true|yes|on)$$/ ? 1 : 0); found=1; exit} END {if (!found) print 0}' chess.ini 2>/dev/null)
+LOG_RUN = COMMANDS_DEBUG=$(COMMANDS_DEBUG) COMMANDS_DEBUG_LOG=$(COMMANDS_DEBUG_LOG) bash tests/tuning/command_debug_run.sh
 
-.PHONY: all clean run test
+.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece
 
 all: $(TARGET) $(TARGET_STATIC)
 
@@ -41,9 +45,9 @@ $(TARGET): $(OBJS)
 $(TARGET_STATIC): $(OBJS_STATIC)
 	$(LD) -o $(TARGET_STATIC) $(OBJS_STATIC)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc
+$(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc $(SRCDIR)/eval_tune.inc
 	@mkdir -p $(dir $@)
-	nasm $(NASMFLAGS) $< -o $@
+	nasm $(NASMFLAGS) $(EXTRA_DEFINES) $< -o $@
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TARGET_STATIC)
@@ -52,4 +56,158 @@ run: $(TARGET)
 	./$(TARGET)
 
 test: $(TARGET)
-	bash tests/regression.sh
+	$(LOG_RUN) "bash tests/regression.sh"
+
+strength-gate: $(TARGET_STATIC)
+	$(LOG_RUN) "bash utils/strength_gate.sh ./$(TARGET_STATIC)"
+
+roadmap-p0: $(TARGET_STATIC)
+	$(LOG_RUN) "bash utils/strength_gate.sh \"$(or $(CANDIDATE),./$(TARGET_STATIC))\""
+	$(LOG_RUN) "RUN_TAG=$${RUN_TAG:-p0_$$(date +%Y%m%d_%H%M%S)}; OPENINGS_FILE=$${OPENINGS_FILE:-utils/LumbrasGigaBase_OTB_0001-1899.pgn}; OPENINGS_FORMAT=$${OPENINGS_FORMAT:-pgn}; OPENINGS_ORDER=$${OPENINGS_ORDER:-sequential}; OPENINGS_PLIES=$${OPENINGS_PLIES:-8}; SRAND=$${SRAND:-20260916}; GAMES=$${GAMES:-200}; CONCURRENCY=$${CONCURRENCY:-2}; TC=$${TC:-10+0.1}; HASH_MB=$${HASH_MB:-64}; SPRT=$${SPRT:-elo0=0 elo1=8 alpha=0.05 beta=0.05}; EXECUTE=$${EXECUTE:-0}; PGNOUT=$${PGNOUT:-tests/reports/sprt_$${RUN_TAG}.pgn}; bash utils/sprt_ab_run.sh \"$(or $(CANDIDATE),./$(TARGET_STATIC))\" \"$(or $(BASELINE),./$(TARGET_STATIC))\""
+
+roadmap-p0-record: $(TARGET_STATIC)
+	$(LOG_RUN) "bash utils/strength_gate.sh --record-baseline \"$(or $(CANDIDATE),./$(TARGET_STATIC))\""
+	$(LOG_RUN) "RUN_TAG=$${RUN_TAG:-p0_$$(date +%Y%m%d_%H%M%S)}; OPENINGS_FILE=$${OPENINGS_FILE:-utils/LumbrasGigaBase_OTB_0001-1899.pgn}; OPENINGS_FORMAT=$${OPENINGS_FORMAT:-pgn}; OPENINGS_ORDER=$${OPENINGS_ORDER:-sequential}; OPENINGS_PLIES=$${OPENINGS_PLIES:-8}; SRAND=$${SRAND:-20260916}; GAMES=$${GAMES:-200}; CONCURRENCY=$${CONCURRENCY:-2}; TC=$${TC:-10+0.1}; HASH_MB=$${HASH_MB:-64}; SPRT=$${SPRT:-elo0=0 elo1=8 alpha=0.05 beta=0.05}; EXECUTE=$${EXECUTE:-0}; PGNOUT=$${PGNOUT:-tests/reports/sprt_$${RUN_TAG}.pgn}; bash utils/sprt_ab_run.sh \"$(or $(CANDIDATE),./$(TARGET_STATIC))\" \"$(or $(BASELINE),./$(TARGET_STATIC))\""
+
+roadmap-p0-final: $(TARGET_STATIC)
+	$(MAKE) roadmap-p0 CANDIDATE="$(or $(CANDIDATE),./$(TARGET_STATIC))" BASELINE="$(or $(BASELINE),./$(TARGET_STATIC))"
+	$(MAKE) suite-repeat ENGINE="$(or $(CANDIDATE),./$(TARGET_STATIC))" SUITE="$(or $(SUITE),tests/suites/external/arasan2026.epd)" DEPTH="$(or $(DEPTH),6)" RUNS="$(or $(RUNS),3)" TIMEOUT="$(or $(TIMEOUT),900s)" REPORT="$(or $(REPORT),tests/reports/p0_suite_repeat.txt)"
+	$(MAKE) tb-smoke-matrix ENGINE="$(or $(CANDIDATE),./$(TARGET_STATIC))" SYZ_PATH="$(or $(SYZ_PATH),tb)" TIMEOUT="$(or $(TB_TIMEOUT),30)" REPORT="$(or $(TB_REPORT),tests/reports/tb_smoke_matrix.txt)"
+	$(MAKE) tb-verify-3piece TIMEOUT="$(or $(TB_VERIFY_TIMEOUT),60)" TB_DIR="$(or $(SYZ_PATH),tb)"
+
+texel-dataset:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_prepare.py $(or $(PGN_INPUTS),tests/suites/bf.pgn tests/suites/external/WorldChamp2024.pgn) --out $(or $(OUT),tests/reports/texel_dataset.csv) --skip-plies $(or $(SKIP_PLIES),12) --sample-every $(or $(SAMPLE_EVERY),2) --max-positions $(or $(MAX_POSITIONS),50000)
+
+texel-label: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_label_eval.py --engine $(or $(ENGINE),./$(TARGET_STATIC)) --input $(or $(IN),tests/reports/texel_dataset.csv) --out $(or $(OUT),tests/reports/texel_labeled.csv) --go "$(or $(GO),depth 1)" --max-rows $(or $(MAX_ROWS),0)
+
+texel-fit:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_fit.py --input $(or $(IN),tests/reports/texel_labeled.csv) --report $(or $(REPORT),tests/reports/texel_fit.txt) --min-scale $(or $(MIN_SCALE),40) --max-scale $(or $(MAX_SCALE),1200) --steps $(or $(STEPS),600) --clip-abs-cp $(or $(CLIP_ABS_CP),2000)
+
+texel-split:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_split_stats.py --input $(or $(IN),tests/reports/texel_dataset.csv) --train-out $(or $(TRAIN_OUT),tests/reports/texel_train.csv) --valid-out $(or $(VALID_OUT),tests/reports/texel_valid.csv) --stats-out $(or $(STATS_OUT),tests/reports/texel_stats.txt) --train-ratio $(or $(TRAIN_RATIO),0.9) --seed $(or $(SEED),20260916) --ply-bucket $(or $(PLY_BUCKET),10)
+
+texel-pipeline: $(TARGET_STATIC)
+	$(MAKE) texel-dataset OUT=$(or $(DATASET_OUT),tests/reports/texel_dataset.csv) MAX_POSITIONS=$(or $(MAX_POSITIONS),50000) SKIP_PLIES=$(or $(SKIP_PLIES),12) SAMPLE_EVERY=$(or $(SAMPLE_EVERY),2) PGN_INPUTS="$(or $(PGN_INPUTS),tests/suites/bf.pgn tests/suites/external/WorldChamp2024.pgn)"
+	$(MAKE) texel-label ENGINE=$(or $(ENGINE),./$(TARGET_STATIC)) IN=$(or $(DATASET_OUT),tests/reports/texel_dataset.csv) OUT=$(or $(LABELED_OUT),tests/reports/texel_labeled.csv) GO="$(or $(GO),depth 1)" MAX_ROWS=$(or $(MAX_ROWS),0)
+	$(MAKE) texel-split IN=$(or $(LABELED_OUT),tests/reports/texel_labeled.csv) TRAIN_OUT=$(or $(TRAIN_OUT),tests/reports/texel_train.csv) VALID_OUT=$(or $(VALID_OUT),tests/reports/texel_valid.csv) STATS_OUT=$(or $(STATS_OUT),tests/reports/texel_stats.txt) TRAIN_RATIO=$(or $(TRAIN_RATIO),0.9) SEED=$(or $(SEED),20260916) PLY_BUCKET=$(or $(PLY_BUCKET),10)
+	$(MAKE) texel-fit IN=$(or $(TRAIN_OUT),tests/reports/texel_train.csv) REPORT=$(or $(FIT_REPORT),tests/reports/texel_fit.txt) MIN_SCALE=$(or $(MIN_SCALE),40) MAX_SCALE=$(or $(MAX_SCALE),1200) STEPS=$(or $(STEPS),600) CLIP_ABS_CP=$(or $(CLIP_ABS_CP),2000)
+
+texel-trial:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_trial.py --overrides $(or $(OVERRIDES),tests/tuning/overrides_smoke.env) --eval-tune $(or $(EVAL_TUNE),src/eval_tune.inc) --build-cmd "$(or $(BUILD_CMD),make chess-static)" --gate-cmd "$(or $(GATE_CMD),make roadmap-p0 CANDIDATE=./chess-static BASELINE=./chess-static)" --run-gate $(or $(RUN_GATE),0) --keep-changes $(or $(KEEP_CHANGES),0)
+
+texel-batch:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/texel_batch_trials.py --profiles "$(or $(PROFILES),tests/tuning/overrides/*.env)" --report "$(or $(REPORT),tests/reports/texel_batch_trials.txt)" --csv "$(or $(CSV),)" --run-gate $(or $(RUN_GATE),1) --gate-cmd "$(or $(GATE_CMD),make roadmap-p0 CANDIDATE=./chess-static BASELINE=./chess-static)" --build-cmd "$(or $(BUILD_CMD),make chess-static)" --keep-changes $(or $(KEEP_CHANGES),0) --strict $(or $(STRICT),0)
+
+pawn-hash-study:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/pawn_hash_feasibility.py --input "$(or $(INPUT),tests/suites/external/arasan2026.epd)" --report "$(or $(REPORT),tests/reports/pawn_hash_feasibility.txt)" --top $(or $(TOP),10) --signature $(or $(SIGNATURE),exact)
+
+bitboard-tables:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/generate_bitboard_tables.py --output "$(or $(OUTPUT),src/bitboard_tables.inc)"
+
+tb-smoke: $(TARGET_STATIC)
+	$(LOG_RUN) "timeout $(or $(TIMEOUT),30s) sh -c 'printf \"uci\\nsetoption name SyzygyPath value $(or $(SYZ_PATH),tb)\\nposition $(or $(POSITION),startpos)\\ntbtest\\nquit\\n\" | ./$(TARGET_STATIC) --uci' | rg \"tbtest\""
+
+tb-smoke-matrix: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/tb_smoke_matrix.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --syzygy-path "$(or $(SYZ_PATH),tb)" --timeout $(or $(TIMEOUT),30) --report "$(or $(REPORT),tests/reports/tb_smoke_matrix.txt)"
+
+tb-verify-3piece: syzygy-tools
+	$(LOG_RUN) "TB_VERIFY_TIMEOUT=$(or $(TIMEOUT),60) bash utils/tb_verify_3piece.sh $(or $(TB_DIR),tb) $(or $(VERIFIER),tb/syzygy-tb/src/rtbver_local) $(or $(PAWN_VERIFIER),tb/syzygy-tb/src/rtbverp_local)"
+
+syzygy-oracle:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" utils/syzygy_oracle.py --syzygy-path "$(or $(SYZ_PATH),tb)" --fen "$(or $(FEN),8/8/8/8/8/8/4K3/k6Q w - - 0 1)"
+
+tb-oracle-compare: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/tb_oracle_compare.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --syzygy-path "$(or $(SYZ_PATH),tb)" --python "$$PYBIN" --timeout $(or $(TIMEOUT),20)
+
+suite-depth-scan: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/suite_depth_scan.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),4,5,6,7,8)" --timeout "$(or $(TIMEOUT),1200s)" --report "$(or $(REPORT),tests/reports/suite_depth_scan.txt)"
+
+suite-repeat: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/suite_repeat.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depth $(or $(DEPTH),6) --runs $(or $(RUNS),5) --timeout "$(or $(TIMEOUT),900s)" --report "$(or $(REPORT),tests/reports/suite_repeat.txt)"
+
+search-ablation-scan:
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	$(LOG_RUN) "$$PYBIN" tests/tuning/search_ablation_scan.py --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),6,8)" --heuristics "$(or $(HEURISTICS),LMR,NULL,LMP,RFP)" --timeout "$(or $(TIMEOUT),900s)" --report "$(or $(REPORT),tests/reports/search_ablation_scan.txt)"
+
+commands-log-tail:
+	@if [[ ! -f "$(COMMANDS_DEBUG_LOG)" ]]; then echo "log file not found: $(COMMANDS_DEBUG_LOG)"; exit 1; fi
+	tail -n $(or $(N),50) "$(COMMANDS_DEBUG_LOG)"
+
+ab-compare:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make ab-compare CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
+	$(LOG_RUN) "bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+ab-compare-report:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make ab-compare-report CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
+	$(LOG_RUN) "REPORT_TSV=tests/reports/ab_history.tsv REPORT_MD=tests/reports/ab_latest.md bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+ab-history:
+	$(LOG_RUN) "bash utils/ab_history_tail.sh tests/reports/ab_history.tsv $(or $(N),10)"
+
+nightly-pipeline:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make nightly-pipeline CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
+	$(LOG_RUN) "bash utils/nightly_pipeline.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+sprt-ab:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make sprt-ab CANDIDATE=./candidate [BASELINE=./chess-static] [EXECUTE=1]"; exit 2; fi
+	$(LOG_RUN) "bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+rtbz-variants:
+	@if [ -n "$(GENERATOR)" ]; then \
+		if [ -z "$(OUTPUT_DIR)" ]; then echo "Usage: make rtbz-variants GENERATOR='...' OUTPUT_DIR=... [MAX_PIECES=5] [SIDED=single|all] [SHOW=both|canonical|alias] [BEST_OUTPUT=...] [REPORT=...] [VARIANTS=...]"; exit 2; fi; \
+		python3 utils/rtbz_variants.py --max-pieces $(or $(MAX_PIECES),5) --sided $(or $(SIDED),single) --show $(or $(SHOW),both) --generator "$(GENERATOR)" --output-dir "$(OUTPUT_DIR)" $(if $(BEST_OUTPUT),--best-output "$(BEST_OUTPUT)") $(if $(REPORT),--report "$(REPORT)") $(if $(VARIANTS),--variants "$(VARIANTS)"); \
+	else \
+		python3 utils/rtbz_variants.py --max-pieces $(or $(MAX_PIECES),5) --sided $(or $(SIDED),single) --show $(or $(SHOW),both) $(if $(VARIANTS),--variants "$(VARIANTS)"); \
+	fi
+
+syzygy-tools:
+	@echo "Building syzygy1/tb generator tools (portable flags)..."
+	@if [ ! -d tb/syzygy-tb ]; then git clone --depth 1 https://github.com/syzygy1/tb tb/syzygy-tb; fi
+	@cd tb/syzygy-tb/src && \
+	  make clean >/dev/null 2>&1 || true; \
+	  make FLAGS='-DMAGIC -DUSE_POPCNT -DTBPIECES=7 -DCOMPRESSION_THREADS=2 -DREGULAR' \
+	       LDFLAGS='' \
+	       CFLAGS='-O3 -pipe -D_GNU_SOURCE -Wall -std=c11' \
+	       -f Makefile.regular -j$$(nproc) rtbgen rtbgenp tbcheck; \
+	  make FLAGS='-DMAGIC -DUSE_POPCNT -DTBPIECES=7 -DCOMPRESSION_THREADS=2 -DREGULAR' \
+	       LDFLAGS='' \
+	       CFLAGS='-O3 -pipe -D_GNU_SOURCE -Wall -std=c11' \
+	       -f Makefile.regular -j$$(nproc) objsr/tbver.o objsr/tbverp.o objsr/decompress.o; \
+	  cc -O3 -pipe -D_GNU_SOURCE -Wall -std=c11 -o rtbver_local \
+	       objsr/tbver.o objsr/decompress.o objsr/threads.o objsr/checksum.o objsr/city-c.o objsr/util.o objsr/lz4.o; \
+	  cc -O3 -pipe -D_GNU_SOURCE -Wall -std=c11 -o rtbverp_local \
+	       objsr/tbverp.o objsr/decompress.o objsr/threads.o objsr/checksum.o objsr/city-c.o objsr/util.o objsr/lz4.o; \
+	  cd $(CURDIR) && bash utils/syzygy_alias_links.sh tb
+
+syzygy-3piece: syzygy-tools
+	@echo "Generating real 3-piece Syzygy tables into tb/*.rtbw and tb/*.rtbz ..."
+	@TBGEN='cd $(CURDIR)/tb && export RTBPATH=$(CURDIR)/tb && case "{canonical}" in *P*) $(CURDIR)/tb/syzygy-tb/src/rtbgenp {canonical} ;; *) $(CURDIR)/tb/syzygy-tb/src/rtbgen {canonical} ;; esac' \
+	  bash tb/generate_3piece.sh
