@@ -10,7 +10,7 @@ TARGET_STATIC = chess-static
 SRCDIR      = src
 OBJDIR      = obj
 
-SRCS        = main.asm board.asm move.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm tb.asm uci.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
+SRCS        = main.asm board.asm move.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm tb.asm bb.asm nnue.asm uci.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
 
 SRCS_STATIC = $(filter-out gfx/sdl.asm,$(SRCS)) gfx/sdl_stub.asm
 
@@ -45,7 +45,7 @@ $(TARGET): $(OBJS)
 $(TARGET_STATIC): $(OBJS_STATIC)
 	$(LD) -o $(TARGET_STATIC) $(OBJS_STATIC)
 
-$(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc $(SRCDIR)/eval_tune.inc
+$(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc $(SRCDIR)/eval_tune.inc $(SRCDIR)/pst_tune.inc
 	@mkdir -p $(dir $@)
 	nasm $(NASMFLAGS) $(EXTRA_DEFINES) $< -o $@
 

@@ -56,6 +56,7 @@ uci_tbtest_map:    db " map_bytes=", 0
 uci_tbtest_path:   db " path=", 0
 uci_tbtest_wdl_payload: db " wdl_payload_byte=", 0
 uci_tbtest_dtz_payload: db " dtz_payload_byte=", 0
+uci_bbtest_prefix: db "info string bbtest mismatches=", 0
 
 uci_log_name:      db "uci_debug.log", 0
 uci_log_start:     db "=== Zeus_KO ", BUILD_DATE_STR, " start ===", 10
@@ -110,6 +111,8 @@ extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
 extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
+extern bb_validate_position
+extern book_pick_move, book_mode, book_search_depth
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 extern suite_cmd_uci
 
@@ -1603,7 +1606,14 @@ uci_go:
 .search:
     cmp byte [uci_own_book], 0
     je .no_book
+    cmp byte [book_mode], 0
+    jne .think_book
     call book_lookup
+    test rax, rax
+    jnz .do_move
+    jmp .no_book
+.think_book:
+    call book_pick_move
     test rax, rax
     jnz .do_move
 .no_book:
@@ -2104,6 +2114,14 @@ uci_loop:
     test rax, rax
     jnz .tbtest
 
+    ; 'bbtest' (non-standard helper, bitboard scaffold validation)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_bbtest]
+    call uci_str_eq
+    test rax, rax
+    jnz .bbtest
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
@@ -2218,6 +2236,18 @@ uci_loop:
     call write_str
     jmp .loop
 
+.bbtest:
+    call bb_validate_position
+    mov r12, rax
+    lea rdi, [uci_bbtest_prefix]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    lea rdi, [msg_newline]
+    mov rdx, 1
+    call write_str
+    jmp .loop
+
 .done:
     call pgn_quit             ; uzavrie partiu a zavrie games.pgn
     pop r12
@@ -2236,3 +2266,4 @@ uci_loop:
 .str_analyze: db "analyze", 0
 .str_suite:   db "suite", 0
 .str_tbtest:  db "tbtest", 0
+.str_bbtest:  db "bbtest", 0

@@ -3,10 +3,10 @@
 ; ============================================================
 
 ; bonusy/penale (centipwny)
-BISHOP_PAIR    equ 30
+BISHOP_PAIR    equ 43
 DOUBLED_PEN    equ 12
 ISOLATED_PEN   equ 15
-PASSED_BASE    equ 15
+PASSED_BASE    equ 11
 PASSED_STEP    equ 25
 CONNECTED_PP_BASE equ 8
 CONNECTED_PP_STEP equ 2
@@ -14,7 +14,7 @@ ROOK_OPEN      equ 25
 ROOK_SEMI      equ 12
 ROOK_SEVENTH   equ 20
 ROOK_BEHIND_PP equ 18    ; veza za prekonajucim pesiakom
-TEMPO_BONUS    equ 18
+TEMPO_BONUS    equ 22
 
 ; mobility: bonus za dosiahnutelne policko (N/B/R/Q), MG/EG
 ; indexy: 0=prazdne,1=pesiak,2=jazdec,3=strelec,4=veza,5=dama,6=kral
@@ -28,7 +28,7 @@ mob_base_eg: db 0, 0, 4, 7, 8, 14, 0
 ; king tropism: vaha za figuru blizko krala (distance <= 2)
 ; indexy 0..6: prazdne,pesiak,jazdec,strelec,veza,dama,kral
 tropism_weights: db 0, 0, 2, 2, 3, 5, 0
-TROPISM_SCALE  equ 3    ; multiplikator penalty
+TROPISM_SCALE  equ 4    ; multiplikator penalty
 
 ; king safety (iba MG)
 SHIELD_PAWN    equ 12   ; pesiak v suprade pred kralom

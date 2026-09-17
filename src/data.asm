@@ -157,7 +157,7 @@ global captured_by_black, captured_by_black_len
 global book_moves, book_moves_len, pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 
 global book_filename, config_filename, key_book, default_book, key_search_depth, default_search_depth
-global key_language, default_language, key_syzygy, default_syzygy
+global key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file
 global lang_file_en, lang_file_sk
 
 global lkey_menu_title, ldef_menu_title
@@ -241,6 +241,30 @@ default_language:
 
 default_syzygy:
     db "", 0
+
+key_book_mode:
+    db "book_mode", 0
+
+default_book_mode:
+    db "1", 0
+
+key_book_search_depth:
+    db "book_search_depth", 0
+
+default_book_search_depth:
+    db "4", 0
+
+key_eval_mode:
+    db "eval_mode", 0
+
+default_eval_mode:
+    db "0", 0
+
+key_nnue_file:
+    db "nnue_file", 0
+
+default_nnue_file:
+    db "net.nnue", 0
 
 lang_file_en:
     db "lang/en.ini", 0
@@ -491,6 +515,12 @@ uci_own_book:   resb 1
 uci_hash_size:  resd 1
 uci_move_overhead: resd 1    ; milliseconds overhead per move (default 100 ms)
 uci_syzygy_probe_depth: resd 1 ; minimalna hlbka pre TB probe (0 = vypnute)
+global book_mode, book_search_depth, eval_mode
+book_mode:      resb 1       ; 0 = instant prvy knizny tah, 1 = vyber searchom
+book_search_depth: resb 1    ; hlbka ratingu kniznych tahov (default 4)
+eval_mode:      resb 1       ; 0 = classic eval, 1 = NNUE (linearny PST model)
+global book_rating_flag
+book_rating_flag: resb 1       ; 1 = prebieha book rating (check_time nepoluje stdin)
 global lang_is_en
 lang_is_en:     resb 1
 

@@ -93,6 +93,7 @@ extern hash_history, hash_count
 extern tb_piece_count, tb_probe_wdl
 extern uci_syzygy_probe_depth
 extern search_poll_input
+extern book_lookup_all, book_moves, book_moves_len, book_mode, book_search_depth, book_rating_flag
 extern singular_excl
 
 ; ============================================================
@@ -115,6 +116,8 @@ check_time:
 .poll_input:
     ; neblokujuce spracovanie stdin (stop/ponderhit/isready/quit)
     ; len kazdych 1024 nodov; aj v mode 3/4, inak by stop nikdy neprisiel
+    cmp byte [book_rating_flag], 0
+    jne .check_mode              ; book rating: nech nezožiera stdin (text mode)
     mov rax, [nodes_searched]
     and rax, 1023
     jnz .check_mode
@@ -2549,4 +2552,90 @@ collect_pv:
     pop rcx
     pop rdi
     pop rsi
+    ret
+
+; ============================================================
+; book_pick_move - knizny tah s volitenym vypoctom
+; book_mode=0: legacy — prvy knizny tah (okamzity)
+; book_mode=1: "thinking book" — engine si vypocita svoj najlepsi tah
+;   na book_search_depth (search_best_move) a knizny tah overi:
+;   - ak je search-best v knihe -> hra sa search-best (kniha suhlasi)
+;   - inak sa knizny tah ohodnoti (make/negamax/unmake); ak je v
+;     margine BOOK_MARGIN cp od search-best, hra sa knizny (zachova
+;     opening znalost/inventory), inak prevezme search-best
+; Vystup: rax = 16-bit tah, 0 = ziaden knizny tah
+; ============================================================
+%define BOOK_MARGIN 80
+
+global book_pick_move
+book_pick_move:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    mov byte [book_rating_flag], 1
+    call book_lookup_all          ; naplni book_moves / book_moves_len
+    mov r12, [book_moves_len]
+    test r12, r12
+    jz .none
+    cmp byte [book_mode], 0
+    je .first
+    ; vlastny vypocet: najlepsi tah na nizkej hlbke
+    movzx rdi, byte [book_search_depth]
+    call search_best_move
+    mov rbx, rax                  ; search-best move
+    test rbx, rbx
+    jz .first                     ; search nenasiel nic -> knizny prvy
+    mov r13d, dword [search_last_score]  ; search-best skore
+    ; je search-best v knihe?
+    xor rcx, rcx
+.find_loop:
+    cmp rcx, r12
+    jae .verify_book
+    lea rax, [book_moves]
+    movzx edx, word [rax + rcx*2]
+    cmp edx, ebx
+    je .return_best               ; kniha suhlasi s vypoctom
+    inc rcx
+    jmp .find_loop
+.verify_book:
+    ; ohodnot prvy knizny tah
+    lea rax, [book_moves]
+    movzx r14d, word [rax]
+    mov rax, r14
+    call make_move
+    movzx rdi, byte [book_search_depth]
+    dec rdi
+    mov rsi, -INF
+    mov rdx, INF
+    mov rcx, 1
+    call negamax
+    neg eax                       ; skore knizneho tahu z pohladu root
+    mov r15d, eax
+    call unmake_move
+    ; knizny v margine? -> hra sa knizny, inak search-best
+    mov eax, r13d
+    sub eax, r15d                 ; search_best - book
+    cmp eax, BOOK_MARGIN
+    jg .return_book
+.return_best:
+    mov rax, rbx
+    jmp .ret
+.return_book:
+    mov eax, r14d
+    jmp .ret
+.first:
+    lea rax, [book_moves]
+    movzx eax, word [rax]
+    jmp .ret
+.none:
+    xor eax, eax
+.ret:
+    mov byte [book_rating_flag], 0
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
     ret
