@@ -1,0 +1,72 @@
+[
+  {
+    "canonical": "KBvK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "output": "tb/KBvK.rtbz",
+    "size": 80
+  },
+  {
+    "canonical": "KNvK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "output": "tb/KNvK.rtbz",
+    "size": 80
+  },
+  {
+    "canonical": "KvBK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "output": "tb/KvBK.rtbz",
+    "size": 80
+  },
+  {
+    "canonical": "KvNK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "output": "tb/KvNK.rtbz",
+    "size": 80
+  },
+  {
+    "canonical": "KPvK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "output": "tb/KPvK.rtbz",
+    "size": 4176
+  },
+  {
+    "canonical": "KvPK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "output": "tb/KvPK.rtbz",
+    "size": 4176
+  },
+  {
+    "canonical": "KQvK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "output": "tb/KQvK.rtbz",
+    "size": 5392
+  },
+  {
+    "canonical": "KvQK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "output": "tb/KvQK.rtbz",
+    "size": 5392
+  },
+  {
+    "canonical": "KRvK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "output": "tb/KRvK.rtbz",
+    "size": 7632
+  },
+  {
+    "canonical": "KvRK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "output": "tb/KvRK.rtbz",
+    "size": 7632
+  }
+]

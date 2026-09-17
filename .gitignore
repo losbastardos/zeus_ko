@@ -15,8 +15,10 @@ uci_debug.log
 commands_debug.log
 .xdp-*
 
-# generované Syzygy tabuľky + nástroje (make syzygy-3piece)
-tb/
+# Syzygy: trackujeme len vygenerované 3-piece tabuľky + generátor skript
+# (nie nástroje clone / build artefakty)
+tb/syzygy-tb/
+tb/rtblog.txt
 
 # výstupy test/tuning pipeline (make *_REPORT=...)
 tests/reports/
@@ -29,5 +31,18 @@ __pycache__/
 docs/
 AGENTS.md
 .vscode/
-utils/
 SESSION_LOG.md
+
+# utils: trackujeme len workflow skripty referencované z Makefile;
+# ostatné (deploy s lokálnymi cestami, PGN databázy, book generátory) ostávajú súkromné
+utils/*
+!utils/ab_compare.sh
+!utils/ab_history_tail.sh
+!utils/nightly_pipeline.sh
+!utils/rtbz_variants.py
+!utils/sprt_ab_run.sh
+!utils/sprt_match.py
+!utils/strength_gate.sh
+!utils/syzygy_alias_links.sh
+!utils/syzygy_oracle.py
+!utils/tb_verify_3piece.sh
