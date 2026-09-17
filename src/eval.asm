@@ -129,6 +129,7 @@ section .text
 
 extern board
 extern side, eval_mode
+extern nnue2_eval
 
 ; ============================================================
 ; MOB_WALK df, dr, sliding - krok/luc mobility z policka
@@ -287,6 +288,13 @@ evaluate:
     push rsi
     push rdi
 
+    ; NNUE faza 2: priama evaluacia 1-skrytou-vrstvou sietou
+    cmp byte [eval_mode], 2
+    jne .classic_eval
+    call nnue2_eval
+    jmp .neg_done_early
+
+.classic_eval:
     ; lokaly:
     ; [rbp-8]  = maska bielych pesiacov
     ; [rbp-16] = maska ciernych pesiacov
@@ -1278,7 +1286,7 @@ evaluate:
 .tempo_done:
 
     mov eax, r15d
-
+.neg_done_early:
     pop rdi
     pop rsi
     pop r15

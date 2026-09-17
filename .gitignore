@@ -47,3 +47,4 @@ utils/*
 !utils/syzygy_oracle.py
 !utils/tb_verify_3piece.sh
 net.nnue
+net2.nnue
