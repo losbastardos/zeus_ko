@@ -1102,6 +1102,9 @@ gfx_draw_board:
 ; Vystup: eax = 0..63 alebo -1
 ; ============================================================
 gfx_square_from_xy:
+    push r14
+    push r15
+
     mov eax, r12d
     sub eax, [board_offset_x]
     cmp eax, 0
@@ -1127,9 +1130,13 @@ gfx_square_from_xy:
     mov r12d, r15d
     mov r13d, r14d
     call screen_to_board
+    pop r15
+    pop r14
     ret
 
 .invalid:
+    pop r15
+    pop r14
     mov rax, -1
     ret
 
