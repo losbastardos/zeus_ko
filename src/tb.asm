@@ -428,6 +428,7 @@ tb_probe_wdl:
     push r13
     push r14
     call tb_unmap_current
+    lea rdi, [tb_file_path] ; unmap clobberuje rdi (munmap addr) -> reload cesty
     call tb_load_path
     pop r14
     pop r13
