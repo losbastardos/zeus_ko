@@ -9,6 +9,7 @@
 
 %include "chess.inc"
 %include "eval_tune.inc"
+%include "pst_tune.inc"
 
 DEFAULT REL
 
@@ -47,148 +48,47 @@ phase_weights:
     db 4            ; QUEEN
     db 0            ; KING
 
-pst_empty:  times 64 db 0
+; runtime PST tabulky (naplni pst_init z pst_tune.inc zakladov * scale,
+; alebo nnue_load z net.nnue; layout [own 7x64][enemy 7x64] per faza)
+section .bss
+global pst_runtime_mg, pst_runtime_eg
+pst_runtime_mg: resb 64*14
+pst_runtime_eg: resb 64*14
 
-pst_pawn_mg:
-    db   0,  0,  0,  0,  0,  0,  0,  0
-    db  50, 50, 50, 50, 50, 50, 50, 50
-    db  10, 10, 20, 30, 30, 20, 10, 10
-    db   5,  5, 10, 25, 25, 10,  5,  5
-    db   0,  0,  0, 20, 20,  0,  0,  0
-    db   5, -5,-10,  0,  0,-10, -5,  5
-    db   5, 10, 10,-20,-20, 10, 10,  5
-    db   0,  0,  0,  0,  0,  0,  0,  0
-
-; EG: posunute pesiaci hodnejsi (zaratava sa aj v passed bonuse)
-pst_pawn_eg:
-    db   0,  0,  0,  0,  0,  0,  0,  0
-    db  60, 60, 60, 60, 60, 60, 60, 60
-    db  20, 20, 25, 30, 30, 25, 20, 20
-    db  10, 10, 15, 25, 25, 15, 10, 10
-    db   5,  5, 10, 20, 20, 10,  5,  5
-    db   0,  0,  5,  5,  5,  5,  0,  0
-    db   5,  5,  0,  0,  0,  0,  5,  5
-    db   0,  0,  0,  0,  0,  0,  0,  0
-
-pst_knight_mg:
-    db -50,-40,-30,-30,-30,-30,-40,-50
-    db -40,-20,  0,  0,  0,  0,-20,-40
-    db -30,  0, 10, 15, 15, 10,  0,-30
-    db -30,  5, 15, 20, 20, 15,  5,-30
-    db -30,  0, 15, 20, 20, 15,  0,-30
-    db -30,  5, 10, 15, 15, 10,  5,-30
-    db -40,-20,  0,  5,  5,  0,-20,-40
-    db -50,-40,-30,-30,-30,-30,-40,-50
-
-pst_knight_eg:
-    db -50,-40,-30,-30,-30,-30,-40,-50
-    db -40,-20,  0,  0,  0,  0,-20,-40
-    db -30,  0, 10, 15, 15, 10,  0,-30
-    db -30,  5, 15, 20, 20, 15,  5,-30
-    db -30,  0, 15, 20, 20, 15,  0,-30
-    db -30,  5, 10, 15, 15, 10,  5,-30
-    db -40,-20,  0,  5,  5,  0,-20,-40
-    db -50,-40,-30,-30,-30,-30,-40,-50
-
-pst_bishop_mg:
-    db -20,-10,-10,-10,-10,-10,-10,-20
-    db -10,  0,  0,  0,  0,  0,  0,-10
-    db -10,  0,  5, 10, 10,  5,  0,-10
-    db -10,  5,  5, 10, 10,  5,  5,-10
-    db -10,  0, 10, 10, 10, 10,  0,-10
-    db -10, 10, 10, 10, 10, 10, 10,-10
-    db -10,  5,  0,  0,  0,  0,  5,-10
-    db -20,-10,-10,-10,-10,-10,-10,-20
-
-pst_bishop_eg:
-    db -20,-10,-10,-10,-10,-10,-10,-20
-    db -10,  0,  0,  0,  0,  0,  0,-10
-    db -10,  0,  5, 10, 10,  5,  0,-10
-    db -10,  5,  5, 10, 10,  5,  5,-10
-    db -10,  0, 10, 10, 10, 10,  0,-10
-    db -10, 10, 10, 10, 10, 10, 10,-10
-    db -10,  5,  0,  0,  0,  0,  5,-10
-    db -20,-10,-10,-10,-10,-10,-10,-20
-
-pst_rook_mg:
-    db   0,  0,  0,  0,  0,  0,  0,  0
-    db   5, 10, 10, 10, 10, 10, 10,  5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db   0,  0,  0,  5,  5,  0,  0,  0
-
-pst_rook_eg:
-    db   0,  0,  0,  0,  0,  0,  0,  0
-    db   5, 10, 10, 10, 10, 10, 10,  5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db  -5,  0,  0,  0,  0,  0,  0, -5
-    db   0,  0,  0,  5,  5,  0,  0,  0
-
-pst_queen_mg:
-    db -20,-10,-10, -5, -5,-10,-10,-20
-    db -10,  0,  0,  0,  0,  0,  0,-10
-    db -10,  0,  5,  5,  5,  5,  0,-10
-    db  -5,  0,  5,  5,  5,  5,  0, -5
-    db   0,  0,  5,  5,  5,  5,  0, -5
-    db -10,  5,  5,  5,  5,  5,  0,-10
-    db -10,  0,  5,  0,  0,  0,  0,-10
-    db -20,-10,-10, -5, -5,-10,-10,-20
-
-pst_queen_eg:
-    db -20,-10,-10, -5, -5,-10,-10,-20
-    db -10,  0,  0,  0,  0,  0,  0,-10
-    db -10,  0,  5,  5,  5,  5,  0,-10
-    db  -5,  0,  5,  5,  5,  5,  0, -5
-    db   0,  0,  5,  5,  5,  5,  0, -5
-    db -10,  5,  5,  5,  5,  5,  0,-10
-    db -10,  0,  5,  0,  0,  0,  0,-10
-    db -20,-10,-10, -5, -5,-10,-10,-20
-
-; MG kral: utulok v rohu (bezpecnost)
-pst_king_mg:
-    db -30,-40,-40,-50,-50,-40,-40,-30
-    db -30,-40,-40,-50,-50,-40,-40,-30
-    db -30,-40,-40,-50,-50,-40,-40,-30
-    db -30,-40,-40,-50,-50,-40,-40,-30
-    db -20,-30,-30,-40,-40,-30,-30,-20
-    db -10,-20,-20,-20,-20,-20,-20,-10
-    db  20, 20,  0,  0,  0,  0, 20, 20
-    db  20, 30, 10,  0,  0, 10, 30, 20
-
-; EG kral: centralizacia (opacny charakter nez MG)
-pst_king_eg:
-    db -20,-10,-10,-10,-10,-10,-10,-20
-    db -10,  0,  5,  5,  5,  5,  0,-10
-    db -10,  5, 15, 15, 15, 15,  5,-10
-    db -10,  5, 15, 25, 25, 15,  5,-10
-    db -10,  5, 15, 25, 25, 15,  5,-10
-    db -10,  5, 15, 15, 15, 15,  5,-10
-    db -10,  0,  5,  5,  5,  5,  0,-10
-    db -20,-10,-10,-10,-10,-10,-10,-20
-
+section .data
+global pst_ptrs_mg, pst_ptrs_eg
+; index: 0..6 = own (EMPTY..KING), 7..13 = enemy (EMPTY..KING)
 pst_ptrs_mg:
-    dq pst_empty
-    dq pst_pawn_mg
-    dq pst_knight_mg
-    dq pst_bishop_mg
-    dq pst_rook_mg
-    dq pst_queen_mg
-    dq pst_king_mg
+    dq pst_runtime_mg + 0*64
+    dq pst_runtime_mg + 1*64
+    dq pst_runtime_mg + 2*64
+    dq pst_runtime_mg + 3*64
+    dq pst_runtime_mg + 4*64
+    dq pst_runtime_mg + 5*64
+    dq pst_runtime_mg + 6*64
+    dq pst_runtime_mg + 7*64
+    dq pst_runtime_mg + 8*64
+    dq pst_runtime_mg + 9*64
+    dq pst_runtime_mg + 10*64
+    dq pst_runtime_mg + 11*64
+    dq pst_runtime_mg + 12*64
+    dq pst_runtime_mg + 13*64
 
 pst_ptrs_eg:
-    dq pst_empty
-    dq pst_pawn_eg
-    dq pst_knight_eg
-    dq pst_bishop_eg
-    dq pst_rook_eg
-    dq pst_queen_eg
-    dq pst_king_eg
+    dq pst_runtime_eg + 0*64
+    dq pst_runtime_eg + 1*64
+    dq pst_runtime_eg + 2*64
+    dq pst_runtime_eg + 3*64
+    dq pst_runtime_eg + 4*64
+    dq pst_runtime_eg + 5*64
+    dq pst_runtime_eg + 6*64
+    dq pst_runtime_eg + 7*64
+    dq pst_runtime_eg + 8*64
+    dq pst_runtime_eg + 9*64
+    dq pst_runtime_eg + 10*64
+    dq pst_runtime_eg + 11*64
+    dq pst_runtime_eg + 12*64
+    dq pst_runtime_eg + 13*64
 
 ; masky stlpcov (bit f, f+8, ...) pre pawn structure / open files
 file_masks:
@@ -228,7 +128,7 @@ lo_rank_masks:
 section .text
 
 extern board
-extern side
+extern side, eval_mode
 
 ; ============================================================
 ; MOB_WALK df, dr, sliding - krok/luc mobility z policka
@@ -430,7 +330,10 @@ evaluate:
     and r14d, PIECE_MASK    ; typ figury
     and r13d, COLOR_MASK    ; farba (0 alebo BLACK=8)
 
-    ; --- MG hodnota ---
+    ; --- MG/EG hodnota ---
+    cmp byte [eval_mode], 0
+    jne .nnue_lookup
+    ; classic: mirror podla absolutnej farby, jedna tabulka na typ
     lea rdi, [material_mg]
     mov eax, dword [rdi + r14*4]
     lea rdi, [pst_ptrs_mg]
@@ -450,6 +353,38 @@ evaluate:
     mov rdi, [rdi + r14*8]
     movsx edi, byte [rdi + rbx]
     add edx, edi            ; edx = EG hodnota figury
+    jmp .pst_done
+
+.nnue_lookup:
+    ; NNUE: own/enemy blok + rel. square z pohladu STM
+    ; r14 = typ, r13d = farba (0/8), r12 = policko
+    mov eax, r13d
+    shr eax, 3              ; color_idx 0/1
+    movzx edx, byte [side]
+    xor eax, edx            ; 0 = own farba, 1 = enemy
+    mov ecx, eax
+    shl ecx, 3
+    sub ecx, eax            ; color_rel*7
+    add ecx, r14d           ; index do pst_ptrs (0..13)
+    mov ebx, r12d
+    test eax, eax
+    jz .nnue_index
+    xor ebx, 56             ; enemy figurky: mirror z pohladu STM
+.nnue_index:
+    lea rdi, [pst_ptrs_mg]
+    mov rdi, [rdi + rcx*8]
+    movsx edx, byte [rdi + rbx]
+    lea rdi, [material_mg]
+    mov eax, dword [rdi + r14*4]
+    add eax, edx
+
+    lea rdi, [material_eg]
+    mov edx, dword [rdi + r14*4]
+    lea rdi, [pst_ptrs_eg]
+    mov rdi, [rdi + rcx*8]
+    movsx edi, byte [rdi + rbx]
+    add edx, edi
+.pst_done:
 
     ; --- akumulacia (biely +, cierny -) ---
     test r13d, r13d
@@ -1353,4 +1288,75 @@ evaluate:
     pop rbx
     mov rsp, rbp
     pop rbp
+    ret
+; ============================================================
+; pst_init - naplni runtime PST tabulky zo zakladov * scale
+; runtime[piece*64 + sq] = base[piece][sq] * scale[piece] / 64
+; Volat raz na starte (pred prvym evaluate). Zachova r12/r13.
+; ============================================================
+global pst_init
+pst_init:
+    push r12
+    push r13
+    mov r12, 1              ; typ figury 1..6 (0 = empty, zostava 0)
+.piece_loop:
+    cmp r12, 6
+    ja .done
+    ; zdrojove pointery
+    lea rax, [pst_base_ptrs_mg]
+    mov rbx, [rax + r12*8]
+    lea rax, [pst_base_ptrs_eg]
+    mov rcx, [rax + r12*8]
+    ; scale faktory
+    lea rax, [pst_scale_mg]
+    mov r8d, dword [rax + r12*4]
+    lea rax, [pst_scale_eg]
+    mov r9d, dword [rax + r12*4]
+    ; cielove base offsety = piece*64 (own) a (piece+7)*64 (enemy)
+    mov r10, r12
+    shl r10, 6              ; piece*64
+    lea rdi, [pst_runtime_mg]
+    add rdi, r10            ; dst MG own
+    lea rsi, [pst_runtime_eg]
+    add rsi, r10            ; dst EG own
+    mov r10, r12
+    add r10, 7
+    shl r10, 6              ; (piece+7)*64
+    lea rdx, [pst_runtime_mg]
+    add rdx, r10            ; dst MG enemy
+    push rdx                ; [rsp] = mg enemy dst
+    mov r10, r12
+    add r10, 7
+    shl r10, 6
+    lea rdx, [pst_runtime_eg]
+    add rdx, r10            ; dst EG enemy
+    push rdx                ; [rsp] = eg enemy dst
+    xor r13, r13
+.sq_loop:
+    cmp r13, 64
+    jae .next_piece
+    ; MG
+    movsx eax, byte [rbx + r13]
+    imul eax, r8d
+    sar eax, 6
+    mov [rdi + r13], al
+    mov rdx, [rsp + 8]      ; mg enemy dst
+    mov [rdx + r13], al
+    ; EG
+    movsx eax, byte [rcx + r13]
+    imul eax, r9d
+    sar eax, 6
+    mov [rsi + r13], al
+    mov rdx, [rsp]          ; eg enemy dst
+    mov [rdx + r13], al
+    inc r13
+    jmp .sq_loop
+.next_piece:
+    pop rdx
+    pop rdx
+    inc r12
+    jmp .piece_loop
+.done:
+    pop r13
+    pop r12
     ret

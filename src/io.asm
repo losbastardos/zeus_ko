@@ -357,7 +357,7 @@ read_move:
 
 .check_bench:
     cmp r12, 5
-    jne .validate_move
+    jne .check_bbtest_helper
     cmp byte [move_buf+1], 'e'
     jne .validate_move
     cmp byte [move_buf+2], 'n'
@@ -367,6 +367,23 @@ read_move:
     cmp byte [move_buf+4], 'h'
     jne .validate_move
     mov rax, 8
+    jmp .done
+
+.check_bbtest_helper:
+    ; "bbtest" (6) - fallback pre main dispatch ('b' -> .check_b_cmd)
+    cmp r12, 6
+    jne .validate_move
+    cmp byte [move_buf+1], 'b'
+    jne .validate_move
+    cmp byte [move_buf+2], 't'
+    jne .validate_move
+    cmp byte [move_buf+3], 'e'
+    jne .validate_move
+    cmp byte [move_buf+4], 's'
+    jne .validate_move
+    cmp byte [move_buf+5], 't'
+    jne .validate_move
+    xor rax, rax
     jmp .done
 
 .check_go:

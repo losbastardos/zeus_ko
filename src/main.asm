@@ -141,6 +141,7 @@ tbtest_map_prefix:  db "TBTEST map_bytes=", 0
 tbtest_path_prefix: db "TBTEST path=", 0
 tbtest_wdl_payload_prefix: db "TBTEST wdl_payload_byte=", 0
 tbtest_dtz_payload_prefix: db "TBTEST dtz_payload_byte=", 0
+bbtest_prefix:      db "BBTEST mismatches=", 0
 
 section .text
 global _start
@@ -162,7 +163,7 @@ extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
 extern bench_fens, bench_fens_count
 extern bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
 extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
-extern key_language, default_language, key_syzygy, default_syzygy
+extern key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file
 extern lang_file_en, lang_file_sk
 extern lkey_menu_title, ldef_menu_title
 extern lkey_menu_select, ldef_menu_select
@@ -216,7 +217,7 @@ extern lang_txt_status_white, lang_txt_status_black
 extern lang_txt_mode_engine_white, lang_txt_mode_engine_black, lang_txt_mode_both, lang_txt_mode_none
 extern lang_txt_panel_white_took, lang_txt_panel_black_took, lang_txt_panel_moves, lang_txt_panel_book, lang_txt_panel_pv
 extern lang_txt_panel_help_move, lang_txt_panel_help_flip, lang_txt_panel_help_help, lang_txt_panel_help_summary
-extern search_depth, debug
+extern search_depth, debug, book_mode, book_search_depth, eval_mode
 extern gfx_init, gfx_run
 extern sdl_gfx_init, sdl_gfx_run
 extern msg_engine, msg_engine_len
@@ -235,11 +236,12 @@ extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmo
 extern gfx_active_backend
 extern lang_is_en
 extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
-extern tt_init
+extern tt_init, pst_init, book_pick_move, nnue_load
 extern parse_fen_string, uci_now_ms
 extern nodes_searched
 extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
 extern tb_init, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
+extern bb_validate_position, bb_debug_mismatch
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 
 %define SYS_GETPID 39
@@ -914,6 +916,7 @@ _start:
     mov dword [uci_syzygy_probe_depth], 1
     mov rdi, 64
     call tt_init
+    call pst_init
 
     ; nacitaj konfiguraciu
     lea rdi, [config_filename]
@@ -970,6 +973,51 @@ _start:
     call parse_int
     test rax, rax
     setnz byte [debug]
+
+    ; nacitaj book_mode (0 = instant, 1 = vyber knizneho tahu searchom)
+    lea rdi, [key_book_mode]
+    lea rsi, [default_book_mode]
+    call config_get
+    mov rsi, rax
+    call parse_int
+    test rax, rax
+    setnz byte [book_mode]
+
+    ; nacitaj book_search_depth (1..8)
+    lea rdi, [key_book_search_depth]
+    lea rsi, [default_book_search_depth]
+    call config_get
+    mov rsi, rax
+    call parse_int
+    test rax, rax
+    jg .bsd_ok
+    mov rax, 4
+.bsd_ok:
+    cmp rax, 8
+    jle .bsd_store
+    mov rax, 8
+.bsd_store:
+    mov [book_search_depth], al
+
+    ; eval_mode (0 classic, 1 NNUE) + pripadne nacitanie siete
+    lea rdi, [key_eval_mode]
+    lea rsi, [default_eval_mode]
+    call config_get
+    mov rsi, rax
+    call parse_int
+    test rax, rax
+    setnz byte [eval_mode]
+    cmp byte [eval_mode], 0
+    je .eval_done
+    lea rdi, [key_nnue_file]
+    lea rsi, [default_nnue_file]
+    call config_get
+    mov rdi, rax
+    call nnue_load
+    test eax, eax
+    jz .eval_done
+    mov byte [eval_mode], 0    ; fallback classic pri chybe siete
+.eval_done:
 
     cmp byte [uci_requested], 0
     jne .do_uci             ; --uci na cmdline: menu sa preskoci
@@ -1084,6 +1132,8 @@ _start:
     je .check_g_cmd
     cmp al, 't'
     je .check_t_cmd
+    cmp al, 'b'
+    je .check_b_cmd
 
 .try_move:
     call parse_user_move
@@ -1111,7 +1161,14 @@ _start:
 
     cmp byte [uci_own_book], 0
     je .no_book
+    cmp byte [book_mode], 0
+    jne .think_book
     call book_lookup
+    test rax, rax
+    jnz .book_move
+    jmp .no_book
+.think_book:
+    call book_pick_move
     test rax, rax
     jnz .book_move
 .no_book:
@@ -1279,6 +1336,31 @@ _start:
     cmp byte [move_buf+5], 't'
     jne .do_text
     jmp .do_tbtest
+
+.check_b_cmd:
+    cmp qword [move_buf_len], 6
+    jne .do_text
+    cmp byte [move_buf+1], 'b'
+    jne .do_text
+    cmp byte [move_buf+2], 't'
+    jne .do_text
+    cmp byte [move_buf+3], 'e'
+    jne .do_text
+    cmp byte [move_buf+4], 's'
+    jne .do_text
+    cmp byte [move_buf+5], 't'
+    jne .do_text
+    jmp .do_bbtest
+
+.do_bbtest:
+    call bb_validate_position
+    mov r12, rax
+    lea rdi, [bbtest_prefix]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    call print_newline
+    jmp .game_loop
 
 .do_tbtest:
     call tb_piece_count
