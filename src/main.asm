@@ -136,7 +136,11 @@ menu_invalid_1_6_en_len equ $ - menu_invalid_1_6_en
 
 tbtest_prefix:      db "TBTEST pieces=", 0
 tbtest_wdl_prefix:  db "TBTEST wdl=", 0
+tbtest_dtz_prefix:  db "TBTEST dtz=", 0
 tbtest_map_prefix:  db "TBTEST map_bytes=", 0
+tbtest_path_prefix: db "TBTEST path=", 0
+tbtest_wdl_payload_prefix: db "TBTEST wdl_payload_byte=", 0
+tbtest_dtz_payload_prefix: db "TBTEST dtz_payload_byte=", 0
 
 section .text
 global _start
@@ -235,7 +239,8 @@ extern tt_init
 extern parse_fen_string, uci_now_ms
 extern nodes_searched
 extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
-extern tb_init, tb_probe_wdl, tb_piece_count, tb_map_size
+extern tb_init, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
+extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 
 %define SYS_GETPID 39
 
@@ -1280,6 +1285,8 @@ _start:
     mov r12, rax
     call tb_probe_wdl
     mov r13, rax
+    call tb_probe_dtz
+    mov r15, rax
     mov r14, [tb_map_size]
 
     lea rdi, [tbtest_prefix]
@@ -1294,9 +1301,33 @@ _start:
     call print_number
     call print_newline
 
+    lea rdi, [tbtest_dtz_prefix]
+    call write_cstr
+    mov rax, r15
+    call print_number
+    call print_newline
+
     lea rdi, [tbtest_map_prefix]
     call write_cstr
     mov rax, r14
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_path_prefix]
+    call write_cstr
+    lea rdi, [tb_file_path]
+    call write_cstr
+    call print_newline
+
+    lea rdi, [tbtest_wdl_payload_prefix]
+    call write_cstr
+    movzx rax, byte [tb_wdl_payload_probe_byte]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_payload_prefix]
+    call write_cstr
+    movzx rax, byte [tb_dtz_payload_probe_byte]
     call print_number
     call print_newline
     jmp .game_loop

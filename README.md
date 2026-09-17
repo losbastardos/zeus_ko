@@ -23,7 +23,7 @@ Grafický SDL mód:
 - **E3** ✅ NegaMax (hĺbka 3-4), engine hrá čierneho
 - **E4** ✅ Alpha-Beta + evaluácia (materiál + PST), quiescence
 - **E5** ✅ Opening book (vlastný formát `hash | move`)
-- **E6** 🚧 Syzygy/Nalimov čiastočne: `SyzygyPath`/`SyzygyProbeDepth`, mmap loader pre `.rtbw`, `tbtest`, základný WDL fallback probe
+- **E6** 🚧 Syzygy/Nalimov čiastočne: `SyzygyPath`/`SyzygyProbeDepth`, mmap loader pre `.rtbw`, `tbtest`, WDL/DTZ bootstrap + guardrails, oracle helper pre cross-check
 - **E7** ✅ Grafika: framebuffer/SDL, BMP figúrky, klikacie rozhranie
 - **E8** ✅ Textový UI panel: história ťahov, zajaté figúrky, knižné ťahy, UCI
 
