@@ -51,7 +51,11 @@ uci_unknown_len equ $ - uci_unknown - 1
 
 uci_tbtest_prefix: db "info string tbtest pieces=", 0
 uci_tbtest_wdl:    db " wdl=", 0
+uci_tbtest_dtz:    db " dtz=", 0
 uci_tbtest_map:    db " map_bytes=", 0
+uci_tbtest_path:   db " path=", 0
+uci_tbtest_wdl_payload: db " wdl_payload_byte=", 0
+uci_tbtest_dtz_payload: db " dtz_payload_byte=", 0
 
 uci_log_name:      db "uci_debug.log", 0
 uci_log_start:     db "=== Zeus_KO ", BUILD_DATE_STR, " start ===", 10
@@ -105,7 +109,8 @@ extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
-extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_piece_count, tb_map_size
+extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
+extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 extern suite_cmd_uci
 
 ; ============================================================
@@ -2177,6 +2182,8 @@ uci_loop:
     mov r12, rax
     call tb_probe_wdl
     mov rbx, rax
+    call tb_probe_dtz
+    mov r13, rax
 
     lea rdi, [uci_tbtest_prefix]
     call write_cstr
@@ -2186,9 +2193,25 @@ uci_loop:
     call write_cstr
     mov rax, rbx
     call print_number
+    lea rdi, [uci_tbtest_dtz]
+    call write_cstr
+    mov rax, r13
+    call print_number
     lea rdi, [uci_tbtest_map]
     call write_cstr
     mov rax, [tb_map_size]
+    call print_number
+    lea rdi, [uci_tbtest_path]
+    call write_cstr
+    lea rdi, [tb_file_path]
+    call write_cstr
+    lea rdi, [uci_tbtest_wdl_payload]
+    call write_cstr
+    movzx rax, byte [tb_wdl_payload_probe_byte]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_payload]
+    call write_cstr
+    movzx rax, byte [tb_dtz_payload_probe_byte]
     call print_number
     lea rdi, [msg_newline]
     mov rdx, 1

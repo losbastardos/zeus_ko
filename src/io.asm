@@ -271,6 +271,23 @@ read_move:
     jmp .done
 
 .check_text:
+    ; special helper: tbtest
+    cmp r12, 6
+    jne .check_text_plain
+    cmp byte [move_buf+1], 'b'
+    jne .check_text_plain
+    cmp byte [move_buf+2], 't'
+    jne .check_text_plain
+    cmp byte [move_buf+3], 'e'
+    jne .check_text_plain
+    cmp byte [move_buf+4], 's'
+    jne .check_text_plain
+    cmp byte [move_buf+5], 't'
+    jne .check_text_plain
+    xor rax, rax
+    jmp .done
+
+.check_text_plain:
     cmp r12, 4
     jne .invalid
     cmp byte [move_buf+1], 'e'
