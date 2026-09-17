@@ -12,7 +12,18 @@ chess-static
 book.book
 games.pgn
 uci_debug.log
+commands_debug.log
 .xdp-*
+
+# generované Syzygy tabuľky + nástroje (make syzygy-3piece)
+tb/
+
+# výstupy test/tuning pipeline (make *_REPORT=...)
+tests/reports/
+
+# python venv / cache v tuning infra
+tests/tuning/.venv/
+__pycache__/
 
 # súkromné / lokálne súbory (nesmú na GitHub)
 docs/
