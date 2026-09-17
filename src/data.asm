@@ -157,7 +157,7 @@ global captured_by_black, captured_by_black_len
 global book_moves, book_moves_len, pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 
 global book_filename, config_filename, key_book, default_book, key_search_depth, default_search_depth
-global key_language, default_language
+global key_language, default_language, key_syzygy, default_syzygy
 global lang_file_en, lang_file_sk
 
 global lkey_menu_title, ldef_menu_title
@@ -227,6 +227,9 @@ key_search_depth:
 key_language:
     db "language", 0
 
+key_syzygy:
+    db "syzygy", 0
+
 default_book:
     db "book.book", 0
 
@@ -235,6 +238,9 @@ default_search_depth:
 
 default_language:
     db "en", 0
+
+default_syzygy:
+    db "", 0
 
 lang_file_en:
     db "lang/en.ini", 0
@@ -478,12 +484,13 @@ board_flip:     resb 1
 ; 0 = engine hra biely, 1 = cierny, 2 = oboch, 3 = ziaden
 engine_side:    resb 1
 
-global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead
+global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
 uci_stop_flag:  resb 1
 uci_ponder:     resb 1
 uci_own_book:   resb 1
 uci_hash_size:  resd 1
 uci_move_overhead: resd 1    ; milliseconds overhead per move (default 100 ms)
+uci_syzygy_probe_depth: resd 1 ; minimalna hlbka pre TB probe (0 = vypnute)
 global lang_is_en
 lang_is_en:     resb 1
 
