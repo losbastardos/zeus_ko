@@ -8,6 +8,7 @@
 ; ============================================================
 
 %include "chess.inc"
+%include "eval_tune.inc"
 
 DEFAULT REL
 
@@ -221,51 +222,6 @@ lo_rank_masks:
     dq 0xFFFFFFFFFF
     dq 0xFFFFFFFFFFFF
     dq 0xFFFFFFFFFFFFFF
-
-; bonusy/penale (centipwny)
-BISHOP_PAIR    equ 30
-DOUBLED_PEN    equ 12
-ISOLATED_PEN   equ 15
-PASSED_BASE    equ 15
-PASSED_STEP    equ 25
-ROOK_OPEN      equ 25
-ROOK_SEMI      equ 12
-ROOK_SEVENTH   equ 20
-ROOK_BEHIND_PP equ 18    ; veza za prekonajucim pesiakom
-TEMPO_BONUS    equ 15
-
-; mobility: bonus za dosiahnutelne policko (N/B/R/Q), MG/EG
-; indexy: 0=prazdne,1=pesiak,2=jazdec,3=strelec,4=veza,5=dama,6=kral
-mob_w_mg:   db 0, 0, 5, 5, 3, 1, 0
-mob_w_eg:   db 0, 0, 5, 5, 5, 3, 0
-
-; baseline mobility (pod tento pocet je figura stiesnena -> penal)
-mob_base_mg: db 0, 0, 4, 7, 7, 14, 0
-mob_base_eg: db 0, 0, 4, 7, 8, 14, 0
-
-; king tropism: vaha za figuru blizko krala (distance <= 2)
-; indexy 0..6: prazdne,pesiak,jazdec,strelec,veza,dama,kral
-tropism_weights: db 0, 0, 2, 2, 3, 5, 0
-TROPISM_SCALE  equ 3    ; multiplikator penalty
-
-; king safety (iba MG)
-SHIELD_PAWN    equ 12   ; pesiak v suprade pred kralom
-KINGOPEN_PEN   equ 35   ; otvoreny file pri kralovi (ziadny pesiak)
-KINGSEMI_PEN   equ 18   ; semi-otvoreny vlastnymi (vlastny chyba)
-CASTLE_SHELTER_BONUS equ 8   ; pesiak na f/g/h pred rošádovaným kráľom
-CASTLE_SHELTER_MISS  equ 12  ; chýbajúci pesiak v castled shelteri
-
-; jazdec na outposte (MG/EG), centralne file 2..5 viac
-OUTPOST_MG     equ 15
-OUTPOST_EG     equ 8
-OUTPOST_C_MG   equ 25
-OUTPOST_C_EG   equ 10
-
-; strelec na outposte (iba MG), konzervativne
-B_OUTPOST_MG     equ 10
-B_OUTPOST_EG     equ 0
-B_OUTPOST_C_MG   equ 15
-B_OUTPOST_C_EG   equ 0
 
 
 
@@ -1127,6 +1083,152 @@ evaluate:
     sub r15d, edx
     jmp .pp_b_loop
 .pp_b_done:
+
+    ; --- connected passed pawns ---
+    ; passed pesiak s kamaratom na susednom file (rovnaky/susedny rank)
+    ; dostane maly bonus; pri postupe rastie.
+    lea rsi, [board]
+
+    ; bieli passeri
+    mov rax, [rbp - 88]
+.cpp_w_loop:
+    test rax, rax
+    jz .cpp_b_start
+    bsf rdx, rax
+    btr rax, rdx
+
+    mov ecx, edx
+    and ecx, 7              ; file
+    mov r8d, edx
+    shr r8d, 3              ; rank
+    xor r9d, r9d            ; found flag
+
+    ; lava strana (f-1)
+    test ecx, ecx
+    jz .cpp_w_right
+    lea r10d, [edx - 1]     ; rovnaky rank
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+    test r8d, r8d
+    jz .cpp_w_l_up
+    lea r10d, [edx - 9]     ; rank-1
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+.cpp_w_l_up:
+    cmp r8d, 7
+    je .cpp_w_right
+    lea r10d, [edx + 7]     ; rank+1
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+
+.cpp_w_right:
+    cmp ecx, 7
+    je .cpp_w_apply
+    lea r10d, [edx + 1]     ; rovnaky rank
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+    test r8d, r8d
+    jz .cpp_w_r_up
+    lea r10d, [edx - 7]     ; rank-1
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+.cpp_w_r_up:
+    cmp r8d, 7
+    je .cpp_w_apply
+    lea r10d, [edx + 9]     ; rank+1
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | WHITE
+    je .cpp_w_found
+    jmp .cpp_w_apply
+
+.cpp_w_found:
+    mov r9d, 1
+
+.cpp_w_apply:
+    test r9d, r9d
+    jz .cpp_w_loop
+    mov r10d, r8d
+    imul r10d, CONNECTED_PP_STEP
+    add r10d, CONNECTED_PP_BASE
+    add r15d, r10d
+    jmp .cpp_w_loop
+
+.cpp_b_start:
+    mov rax, [rbp - 96]
+.cpp_b_loop:
+    test rax, rax
+    jz .cpp_done
+    bsf rdx, rax
+    btr rax, rdx
+
+    mov ecx, edx
+    and ecx, 7              ; file
+    mov r8d, edx
+    shr r8d, 3              ; rank
+    xor r9d, r9d            ; found flag
+
+    ; lava strana (f-1)
+    test ecx, ecx
+    jz .cpp_b_right
+    lea r10d, [edx - 1]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+    test r8d, r8d
+    jz .cpp_b_l_up
+    lea r10d, [edx - 9]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+.cpp_b_l_up:
+    cmp r8d, 7
+    je .cpp_b_right
+    lea r10d, [edx + 7]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+
+.cpp_b_right:
+    cmp ecx, 7
+    je .cpp_b_apply
+    lea r10d, [edx + 1]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+    test r8d, r8d
+    jz .cpp_b_r_up
+    lea r10d, [edx - 7]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+.cpp_b_r_up:
+    cmp r8d, 7
+    je .cpp_b_apply
+    lea r10d, [edx + 9]
+    movzx r11d, byte [rsi + r10]
+    cmp r11d, PAWN | BLACK
+    je .cpp_b_found
+    jmp .cpp_b_apply
+
+.cpp_b_found:
+    mov r9d, 1
+
+.cpp_b_apply:
+    test r9d, r9d
+    jz .cpp_b_loop
+    mov r10d, 7
+    sub r10d, r8d
+    imul r10d, CONNECTED_PP_STEP
+    add r10d, CONNECTED_PP_BASE
+    sub r15d, r10d
+    jmp .cpp_b_loop
+
+.cpp_done:
 
     ; --- veze: open/semi-open file, 7. rank ---
     xor r12, r12
