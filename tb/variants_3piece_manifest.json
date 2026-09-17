@@ -1,0 +1,92 @@
+[
+  {
+    "canonical": "KBvK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KNvK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KPvK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQvK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRvK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KvBK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KvNK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvPK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvQK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KvRK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "R"
+    ]
+  }
+]
