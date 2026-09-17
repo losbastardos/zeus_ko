@@ -236,7 +236,7 @@ extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmo
 extern gfx_active_backend
 extern lang_is_en
 extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
-extern tt_init, pst_init, book_pick_move, nnue_load
+extern tt_init, pst_init, book_pick_move, nnue_load, nnue2_load
 extern parse_fen_string, uci_now_ms
 extern nodes_searched
 extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
@@ -999,21 +999,34 @@ _start:
 .bsd_store:
     mov [book_search_depth], al
 
-    ; eval_mode (0 classic, 1 NNUE) + pripadne nacitanie siete
+    ; eval_mode (0 classic, 1 linear NNUE, 2 NNUE 1-skryta-vrstva)
     lea rdi, [key_eval_mode]
     lea rsi, [default_eval_mode]
     call config_get
     mov rsi, rax
     call parse_int
+    cmp rax, 2
+    jle .em_ok
+    mov rax, 2
+.em_ok:
     test rax, rax
-    setnz byte [eval_mode]
+    jns .em_nonneg
+    xor rax, rax
+.em_nonneg:
+    mov [eval_mode], al
     cmp byte [eval_mode], 0
     je .eval_done
     lea rdi, [key_nnue_file]
     lea rsi, [default_nnue_file]
     call config_get
     mov rdi, rax
+    cmp byte [eval_mode], 2
+    je .load_v2
     call nnue_load
+    jmp .load_done
+.load_v2:
+    call nnue2_load
+.load_done:
     test eax, eax
     jz .eval_done
     mov byte [eval_mode], 0    ; fallback classic pri chybe siete
