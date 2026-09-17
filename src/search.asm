@@ -11,6 +11,32 @@
 
 DEFAULT REL
 
+; A/B diagnostika heuristik (default = zapnute)
+%ifndef ENABLE_PROBCUT
+%define ENABLE_PROBCUT 1
+%endif
+%ifndef ENABLE_RFP
+%define ENABLE_RFP 1
+%endif
+%ifndef ENABLE_RAZOR
+%define ENABLE_RAZOR 1
+%endif
+%ifndef ENABLE_NULL_PRUNE
+%define ENABLE_NULL_PRUNE 1
+%endif
+%ifndef ENABLE_LMP
+%define ENABLE_LMP 1
+%endif
+%ifndef ENABLE_FUTILITY
+%define ENABLE_FUTILITY 1
+%endif
+%ifndef ENABLE_LMR
+%define ENABLE_LMR 1
+%endif
+%ifndef ENABLE_SINGULAR
+%define ENABLE_SINGULAR 1
+%endif
+
 ; Search pruning konstanty (E9)
 RAZOR_MARGIN    equ 250         ; razoring: eval + margin < alpha pri depth 1
 FUTILITY_MARGIN equ 150         ; futility: margin = FUTILITY_MARGIN * depth (d1: 150, d2: 300)
@@ -31,6 +57,9 @@ killers:        resd 2*64       ; dva killer tahy na kazdy ply
 history:        resd 2*64*64    ; [side][from][to] history heuristic
 cap_history:    resd 6*64*6     ; [figura][to][obet] capture history heuristic
 countermoves:   resw 64*64      ; [prev_from][prev_to] -> quiet tah, ktory refutoval
+cont_history:   resd 64*64*64   ; [prev_to][from][to] 1-ply continuation history
+cont_history2:  resd 64*64*64   ; [prev2_to][from][to] 2-ply continuation history
+corr_history:   resd 2*1024     ; [side][hash&1023] eval correction (centipawns*64)
 move_stack:     resw 64         ; tah odohrany na danom ply (0 = null ply)
 eval_stack:     resd 64         ; static eval na kazdom ply (pre improving flag)
 root_best_move: resd 1          ; best move z predchadzajucej ID iteracie
@@ -62,6 +91,7 @@ extern tt_probe, tt_store, position_hash
 extern check_repetition
 extern hash_history, hash_count
 extern tb_piece_count, tb_probe_wdl
+extern uci_syzygy_probe_depth
 extern search_poll_input
 extern singular_excl
 
@@ -824,7 +854,14 @@ negamax:
     jmp .neg_exit
 .no_draw:
 
-    ; --- SYZYGY TB PROBE (stub) ---
+    ; --- SYZYGY TB PROBE ---
+    ; uci_syzygy_probe_depth: 0 = vypnute, inak probe len pri depth >= threshold
+    movsxd rax, dword [uci_syzygy_probe_depth]
+    test eax, eax
+    jle .tb_skip
+    cmp qword [rbp - 8], rax
+    jl .tb_skip
+
     ; ak je na sachovnici <= 7 kamenov, skus WDL probe
     ; zname skore vratime okamzite; TB_NOT_FOUND = normalny search
     ; (pouzivame len caller-saved registre, nic nie je live)
@@ -841,10 +878,14 @@ negamax:
     xor eax, eax            ; TB_DRAW -> 0
     jmp .neg_exit
 .tb_win:
-    mov eax, 20000
+    ; konzistencia s mate scoringom: rychlejsi win ma vyssie skore
+    mov rax, MATE_SCORE
+    sub rax, [search_ply]
     jmp .neg_exit
 .tb_loss:
-    mov eax, -20000
+    ; konzistencia s mate scoringom: pomalsia prehra ma vyssie skore
+    mov rax, [search_ply]
+    sub rax, MATE_SCORE
     jmp .neg_exit
 .tb_skip:
 
@@ -888,7 +929,10 @@ negamax:
     ; Ak fail-high -> prune (tento uzol presiahne beta aj v plnom searchi).
     ; PROBCUT_MARGIN = 200 cps (Stockfish-like hodnota)
 %define PROBCUT_MARGIN 200
-    cmp qword [rbp - 8], 100
+%if ENABLE_PROBCUT = 0
+    jmp .probcut_done
+%endif
+    cmp qword [rbp - 8], 5
     jl .probcut_done
     cmp dword [rbp - 44], 0         ; !in_check
     jne .probcut_done
@@ -950,7 +994,9 @@ negamax:
     inc qword [search_ply]
     pop rcx
     pop rax
-    ; search: -negamax(depth-4, -beta-PROBCUT_MARGIN-1, -beta-PROBCUT_MARGIN, 0)
+    ; search: -negamax(depth-4, -(beta+margin), -(beta+margin)+1, 0)
+    ; Ak child fail-low (vrati <= -(beta+margin)), potom v rodicovi
+    ; score >= beta+margin -> mozeme prune s hodnotou beta+margin.
     mov rdi, [rbp - 8]
     sub rdi, 4
     test rdi, rdi
@@ -960,9 +1006,9 @@ negamax:
 .pc_depth_ok:
     mov rsi, [rbp - 24]
     add rsi, PROBCUT_MARGIN
-    neg rsi                         ; -(beta + margin)
+    neg rsi                         ; -(beta + margin) = child alpha
     mov rdx, rsi
-    inc rdx                         ; -(beta + margin) + 1
+    inc rdx                         ; -(beta + margin) + 1 = child beta
     push rcx                        ; zachovaj index cez negamax+unmake
     xor ecx, ecx
     call negamax
@@ -972,10 +1018,12 @@ negamax:
     call unmake_move
     pop rax
     pop rcx
-    cmp eax, dword [rbp - 24]
+    mov edx, dword [rbp - 24]
+    add edx, PROBCUT_MARGIN         ; edx = beta + margin
+    cmp eax, edx
     jl .pc_no_cut
-    add eax, PROBCUT_MARGIN
-    jmp .neg_exit                   ; ProbCut! vracia score
+    mov eax, edx                    ; ProbCut! vraciame beta + margin
+    jmp .neg_exit
 .pc_no_cut:
     jmp .pc_next_after_undo
 .pc_undo:
@@ -984,8 +1032,6 @@ negamax:
     call unmake_move
     pop rcx
 .pc_next_after_undo:
-    ; obnov r15 (move_count moze byt prepisan)
-    movzx r15, word [move_count]
 .pc_next:
     inc rcx
     jmp .pc_loop
@@ -996,6 +1042,7 @@ negamax:
     ; a eval_stack[ply]. improving = ply>=2 && eval > eval_stack[ply-2]
     ; (obe hodnoty musia byt platne, inak improving = 0) -> [rbp - 64]
     mov ecx, EVAL_NONE
+    mov dword [rbp - 68], EVAL_NONE ; raw eval pred correction history (diera medzi improving a singular_move)
     cmp dword [rbp - 44], 0
     jne .eval_ready                 ; v sachu: ziadny static eval
     call evaluate
@@ -1004,7 +1051,19 @@ negamax:
     jz .eval_side_ok
     neg eax
 .eval_side_ok:
-    mov ecx, eax
+    mov ecx, eax                    ; raw eval (side-to-move)
+    mov dword [rbp - 68], ecx
+
+    ; correction history: jemna korekcia static eval podla hash bucketu
+    movzx eax, byte [side]
+    shl eax, 10                     ; side * 1024
+    mov r8, [position_hash]
+    and r8d, 1023                   ; bucket
+    add eax, r8d
+    lea r8, [corr_history]
+    mov edx, dword [r8 + rax*4]
+    sar edx, 6                      ; CP*64 -> CP
+    add ecx, edx
 .eval_ready:
     mov [rbp - 56], ecx             ; static eval (EVAL_NONE v sachu)
     mov rax, [search_ply]
@@ -1026,6 +1085,9 @@ negamax:
     ; --- REVERSE FUTILITY PRUNING (static null move) ---
     ; !in_check && depth <= 3: eval - margin >= beta -> return eval - margin
     ; margin = 120*depth; improving (eval stupa) -> 120*(depth-1), prunej menej
+%if ENABLE_RFP = 0
+    jmp .rfp_done
+%endif
     cmp dword [rbp - 44], 0
     jne .rfp_done
     cmp qword [rbp - 8], 3
@@ -1047,6 +1109,9 @@ negamax:
     ; --- RAZORING ---
     ; depth == 1 && !in_check && eval + RAZOR_MARGIN < alpha -> rovno qsearch
     ; (vynechame generovanie/search celeho zoznamu tahov, vratime vysledok qsearch)
+%if ENABLE_RAZOR = 0
+    jmp .no_razoring
+%endif
     cmp qword [rbp - 8], 1
     jne .no_razoring
     cmp dword [rbp - 44], 0
@@ -1064,6 +1129,9 @@ negamax:
 
     ; --- NULL MOVE PRUNING (TT probe je vyssie, po RFP/IIR) ---
     ; ak povolene, depth >= 3, nie v sachu, nie koncovka, ply < 60
+%if ENABLE_NULL_PRUNE = 0
+    jmp .skip_null
+%endif
     cmp qword [rbp - 40], 0
     je .skip_null
     cmp qword [rbp - 8], 3
@@ -1305,8 +1373,52 @@ negamax:
     lea r9, [countermoves]
     movzx edi, word [r9 + rdi*2]
     cmp edi, eax
-    jne .key_tt_check
+    jne .key_cont_history
     add edx, 45000               ; pod killerom, nad history
+
+.key_cont_history:
+    ; 1-ply continuation history bonus: [prev_to][from][to]
+    movzx edi, word [rbp - 60]
+    shr edi, 6
+    and edi, 0x3F                ; prev to
+    shl edi, 12                  ; prev_to * 4096
+    mov r9d, eax
+    and r9d, 0x3F                ; from
+    shl r9d, 6
+    add edi, r9d
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F                ; to
+    add edi, r9d
+    lea r9, [cont_history]
+    mov esi, dword [r9 + rdi*4]
+    sar esi, 2                   ; 1/4 vahy, nech neprebije history/killer/CM
+    add edx, esi
+
+    ; 2-ply continuation history bonus: [prev2_to][from][to]
+    ; (tah na ply-2, ak existuje; mensia vaha ako 1-ply)
+    mov r9, [search_ply]
+    cmp r9, 2
+    jb .key_tt_check
+    lea r8, [move_stack]
+    movzx edi, word [r8 + r9*2 - 4]
+    test edi, edi
+    jz .key_tt_check
+    shr edi, 6
+    and edi, 0x3F                ; prev2 to
+    shl edi, 12                  ; prev2_to * 4096
+    mov r9d, eax
+    and r9d, 0x3F                ; from
+    shl r9d, 6
+    add edi, r9d
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F                ; to
+    add edi, r9d
+    lea r9, [cont_history2]
+    mov esi, dword [r9 + rdi*4]
+    sar esi, 4                   ; 1/16 vahy
+    add edx, esi
 .key_tt_check:
     cmp r14w, ax                 ; TT tah ma absolutnu prioritu
     jne .key_store
@@ -1467,13 +1579,16 @@ negamax:
 .quiet_done:
 
     ; --- LMP: neskore tiche tahy pri nizkej hlbke preskoc ---
-    ; !in_check && quiet && depth <= 3 && index >= 3 + depth^2
+    ; !in_check && quiet && depth <= 2 && index >= 3 + depth^2
+%if ENABLE_LMP = 0
+    jmp .no_lmp
+%endif
     cmp r12d, 1
     jne .no_lmp
     cmp dword [rbp - 44], 0
     jne .no_lmp
     mov rdx, [rbp - 8]      ; pozor: rax = aktualny tah pre make_move!
-    cmp rdx, 3
+    cmp rdx, 2
     jg .no_lmp
     imul rdx, rdx           ; depth^2
     add rdx, 3
@@ -1486,6 +1601,9 @@ negamax:
     ; --- FUTILITY PRUNING: beznadejne tiche tahy pri nizkej hlbke preskoc ---
     ; !in_check && quiet && depth <= 2 && index >= 1 &&
     ; static_eval + FUTILITY_MARGIN*depth <= alpha && alpha daleko od matu
+%if ENABLE_FUTILITY = 0
+    jmp .no_futility
+%endif
     cmp r12d, 1
     jne .no_futility
     cmp dword [rbp - 44], 0
@@ -1544,6 +1662,9 @@ negamax:
     ; Ak fail-high -> multi-cut prune (beta cutoff).
     ; rcx = index tahov; rax = aktualny tah (pre make_move)
     mov dword [rbp - 72], 0         ; vycisti extension flag
+%if ENABLE_SINGULAR = 0
+    jmp .no_singular
+%endif
     cmp qword [rbp - 8], 8
     jl .no_singular
     cmp dword [rbp - 44], 0         ; nie v sachu
@@ -1642,6 +1763,9 @@ negamax:
 
 .pvs_window:
     ; --- LMR: quiet tah, index >= 4, depth >= 3, nie v sachu ---
+%if ENABLE_LMR = 0
+    jmp .no_lmr
+%endif
     cmp r12d, 1
     jne .no_lmr
     cmp rcx, 4
@@ -1816,6 +1940,74 @@ negamax:
     mov esi, 40000
 .cutoff_hist_store:
     mov dword [r9 + rdi*4], esi
+
+    ; continuation history [prev_to][from][to] += depth^2 (quiet cutoff)
+    mov r9, [search_ply]
+    test r9, r9
+    jz .cutoff_cont_done
+    lea rdx, [move_stack]
+    movzx edx, word [rdx + r9*2 - 2]
+    test edx, edx
+    jz .cutoff_cont_done
+    shr edx, 6
+    and edx, 0x3F                ; prev to
+    shl edx, 12                  ; prev_to * 4096
+    mov edi, eax
+    and edi, 0x3F                ; from
+    shl edi, 6
+    add edx, edi
+    mov edi, eax
+    shr edi, 6
+    and edi, 0x3F                ; to
+    add edx, edi
+    lea r9, [cont_history]
+    mov esi, dword [r9 + rdx*4]
+    mov edi, dword [rbp - 8]     ; depth
+    imul edi, edi
+    add esi, edi
+    cmp esi, 40000
+    jle .cutoff_cont_store
+    mov esi, 40000
+.cutoff_cont_store:
+    mov dword [r9 + rdx*4], esi
+.cutoff_cont_done:
+
+    ; 2-ply continuation history [prev2_to][from][to] += depth^2 (quiet cutoff)
+    mov r9, [search_ply]
+    cmp r9, 2
+    jb .cutoff_cont2_done
+    lea rdx, [move_stack]
+    movzx edx, word [rdx + r9*2 - 4]
+    test edx, edx
+    jz .cutoff_cont2_done
+    shr edx, 6
+    and edx, 0x3F                ; prev2 to
+    shl edx, 12                  ; prev2_to * 4096
+    mov edi, eax
+    and edi, 0x3F                ; from
+    shl edi, 6
+    add edx, edi
+    mov edi, eax
+    shr edi, 6
+    and edi, 0x3F                ; to
+    add edx, edi
+    lea r9, [cont_history2]
+    mov esi, dword [r9 + rdx*4]
+    mov edi, dword [rbp - 8]     ; depth
+    imul edi, edi
+    sar edi, 2                   ; jemnejsi update nez 1-ply continuation
+    cmp edi, 1
+    jge .cutoff_cont2_bonus_ok
+    mov edi, 1
+.cutoff_cont2_bonus_ok:
+    add esi, edi
+    cmp esi, 40000
+    jle .cutoff_cont2_store
+    mov esi, 40000
+.cutoff_cont2_store:
+    mov dword [r9 + rdx*4], esi
+.cutoff_cont2_done:
+
     ; countermove: uloz tah ako refutaciu opponentovho posledneho tahu
     ; (kluc = tah na ply-1; pri root/null ply klucom nie je -> preskoc)
     mov r9, [search_ply]
@@ -1883,6 +2075,54 @@ negamax:
     mov eax, dword [rbp - 16]
     jmp .neg_exit
 .best_ok:
+    ; update correction history na realne prehladanych uzloch
+    ; len pre EXACT uzly (bez fail-high/fail-low bound skreslenia)
+    cmp ebx, dword [rbp - 32]
+    jle .corr_done
+    cmp ebx, dword [rbp - 24]
+    jge .corr_done
+
+    mov edx, dword [rbp - 68]       ; raw eval pred korekciou
+    cmp edx, EVAL_NONE
+    je .corr_done
+    mov eax, ebx
+    sub eax, edx                    ; error = best - raw_eval
+    ; konzervativny clamp, aby sa bucket neprestreli
+    cmp eax, 256
+    jle .corr_hi_ok
+    mov eax, 256
+.corr_hi_ok:
+    cmp eax, -256
+    jge .corr_lo_ok
+    mov eax, -256
+.corr_lo_ok:
+    shl eax, 4                      ; CP -> CP*16 (tabulka je CP*64)
+    movzx edx, byte [side]
+    shl edx, 10
+    mov r8, [position_hash]
+    and r8d, 1023
+    add edx, r8d
+    lea r8, [corr_history]
+
+    ; jemny decay bucketu, aby sa stare chyby postupne zabudali
+    mov ecx, dword [r8 + rdx*4]
+    mov esi, ecx
+    sar esi, 5                      ; ~3.1% decay
+    sub ecx, esi
+    add eax, ecx
+
+    ; clamp bucketu
+    cmp eax, 8192
+    jle .corr_hi_store
+    mov eax, 8192
+.corr_hi_store:
+    cmp eax, -8192
+    jge .corr_store
+    mov eax, -8192
+.corr_store:
+    mov dword [r8 + rdx*4], eax
+.corr_done:
+
     mov eax, ebx
 
     ; pri aborte (uci_stop_flag) neukladaj do TT
@@ -1942,7 +2182,8 @@ search_best_move:
     mov qword [root_pv_len], 0   ; root PV zacina prazdna
     mov rbx, rdi            ; odloz hlbku searchu (generate_all_moves prepise r12-r15)
 
-    ; vynuluj killer tabulku; history/cap_history/countermoves len pri prvej ID iteracii
+    ; vynuluj killer tabulku; history/cap_history/countermoves/continuation/corr
+    ; len pri prvej ID iteracii
     lea rdi, [killers]
     mov rcx, 2*64
     xor eax, eax
@@ -1957,6 +2198,15 @@ search_best_move:
     rep stosd
     lea rdi, [countermoves]
     mov rcx, 64*64/2          ; slova -> po dvoch v dworde
+    rep stosd
+    lea rdi, [cont_history]
+    mov rcx, 64*64*64
+    rep stosd
+    lea rdi, [cont_history2]
+    mov rcx, 64*64*64
+    rep stosd
+    lea rdi, [corr_history]
+    mov rcx, 2*1024
     rep stosd
 .skip_history_clear:
 
