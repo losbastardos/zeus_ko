@@ -966,15 +966,15 @@ tb_probe_wdl:
     mov byte [tb_wdl_pairs_is_const], 0
 .wdl_meta_done:
 
+    mov rax, [tb_map]
+    mov dl, byte [rax + 4]
+    mov [tb_wdl_header_flags], dl
+
     ; Prvy realny decode slice: constant setup_pairs tabulky dekodujeme priamo
     ; zo Syzygy streamu (raw symbol -> TB class), bez material heuristik.
     call tb_try_constant_wdl
     cmp eax, TB_NOT_FOUND
     jne .done
-
-    mov rax, [tb_map]
-    mov dl, byte [rax + 4]
-    mov [tb_wdl_header_flags], dl
 
 .wdl_eval:
     ; legal/stalemate guard pre male koncovky (nutne cez legal moves)
