@@ -141,6 +141,22 @@ tbtest_map_prefix:  db "TBTEST map_bytes=", 0
 tbtest_path_prefix: db "TBTEST path=", 0
 tbtest_wdl_payload_prefix: db "TBTEST wdl_payload_byte=", 0
 tbtest_dtz_payload_prefix: db "TBTEST dtz_payload_byte=", 0
+tbtest_wdl_off_prefix: db "TBTEST wdl_payload_off=", 0
+tbtest_dtz_off_prefix: db "TBTEST dtz_payload_off=", 0
+tbtest_wdl_flags_prefix: db "TBTEST wdl_flags=", 0
+tbtest_dtz_flags_prefix: db "TBTEST dtz_flags=", 0
+tbtest_wdl_hdr_off_prefix: db "TBTEST wdl_pairs_hdr_off=", 0
+tbtest_dtz_hdr_off_prefix: db "TBTEST dtz_pairs_hdr_off=", 0
+tbtest_wdl_blocks_prefix: db "TBTEST wdl_pairs_blocks=", 0
+tbtest_dtz_blocks_prefix: db "TBTEST dtz_pairs_blocks=", 0
+tbtest_wdl_syms_prefix: db "TBTEST wdl_pairs_syms=", 0
+tbtest_dtz_syms_prefix: db "TBTEST dtz_pairs_syms=", 0
+tbtest_wdl_blocksize_prefix: db "TBTEST wdl_pairs_blocksize=", 0
+tbtest_dtz_blocksize_prefix: db "TBTEST dtz_pairs_blocksize=", 0
+tbtest_wdl_idxbits_prefix: db "TBTEST wdl_pairs_idxbits=", 0
+tbtest_dtz_idxbits_prefix: db "TBTEST dtz_pairs_idxbits=", 0
+tbtest_wdl_const_prefix: db "TBTEST wdl_pairs_const=", 0
+tbtest_dtz_const_prefix: db "TBTEST dtz_pairs_const=", 0
 bbtest_prefix:      db "BBTEST mismatches=", 0
 
 section .text
@@ -243,6 +259,14 @@ extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
 extern tb_init, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
 extern bb_validate_position, bb_debug_mismatch
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
+extern tb_wdl_payload_probe_off, tb_dtz_payload_probe_off
+extern tb_wdl_header_flags, tb_dtz_header_flags
+extern tb_wdl_pairs_header_off, tb_dtz_pairs_header_off
+extern tb_wdl_pairs_num_blocks, tb_dtz_pairs_num_blocks
+extern tb_wdl_pairs_num_syms, tb_dtz_pairs_num_syms
+extern tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
+extern tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
+extern tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 
 %define SYS_GETPID 39
 
@@ -1420,9 +1444,109 @@ _start:
     call print_number
     call print_newline
 
+    lea rdi, [tbtest_wdl_off_prefix]
+    call write_cstr
+    mov rax, [tb_wdl_payload_probe_off]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_flags_prefix]
+    call write_cstr
+    movzx rax, byte [tb_wdl_header_flags]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_hdr_off_prefix]
+    call write_cstr
+    mov rax, [tb_wdl_pairs_header_off]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_blocks_prefix]
+    call write_cstr
+    mov eax, [tb_wdl_pairs_num_blocks]
+    movsxd rax, eax
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_syms_prefix]
+    call write_cstr
+    mov eax, [tb_wdl_pairs_num_syms]
+    movsxd rax, eax
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_blocksize_prefix]
+    call write_cstr
+    movzx rax, byte [tb_wdl_pairs_blocksize]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_idxbits_prefix]
+    call write_cstr
+    movzx rax, byte [tb_wdl_pairs_idxbits]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_wdl_const_prefix]
+    call write_cstr
+    movzx rax, byte [tb_wdl_pairs_is_const]
+    call print_number
+    call print_newline
+
     lea rdi, [tbtest_dtz_payload_prefix]
     call write_cstr
     movzx rax, byte [tb_dtz_payload_probe_byte]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_off_prefix]
+    call write_cstr
+    mov rax, [tb_dtz_payload_probe_off]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_flags_prefix]
+    call write_cstr
+    movzx rax, byte [tb_dtz_header_flags]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_hdr_off_prefix]
+    call write_cstr
+    mov rax, [tb_dtz_pairs_header_off]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_blocks_prefix]
+    call write_cstr
+    mov eax, [tb_dtz_pairs_num_blocks]
+    movsxd rax, eax
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_syms_prefix]
+    call write_cstr
+    mov eax, [tb_dtz_pairs_num_syms]
+    movsxd rax, eax
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_blocksize_prefix]
+    call write_cstr
+    movzx rax, byte [tb_dtz_pairs_blocksize]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_idxbits_prefix]
+    call write_cstr
+    movzx rax, byte [tb_dtz_pairs_idxbits]
+    call print_number
+    call print_newline
+
+    lea rdi, [tbtest_dtz_const_prefix]
+    call write_cstr
+    movzx rax, byte [tb_dtz_pairs_is_const]
     call print_number
     call print_newline
     jmp .game_loop
