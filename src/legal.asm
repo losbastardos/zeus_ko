@@ -18,6 +18,7 @@ global find_king, is_square_attacked, is_in_check, filter_legal_moves
 extern board, side, move_list, move_count
 extern knight_offsets, bishop_dirs, rook_dirs, king_dirs
 extern apply_move
+extern bb_sync, bb_is_square_attacked
 
 ; ============================================================
 ; find_king - najde policko krala danej strany
@@ -434,11 +435,29 @@ filter_legal_moves:
     mov rax, r12
     call apply_move
 
-    ; skontroluj, ci nie je kral v sachu
+    ; pre hot-path legality check prepneme na bitboard attack query
+    ; rcx drzi index v move_list, preto ho treba zachovat cez call retazec
+    push rcx
+    call bb_sync
+
+    ; skontroluj, ci nie je kral v sachu (po aplikovanom tahu)
     movzx rax, byte [side]
-    call is_in_check
-    test rax, rax
+    call find_king
+    cmp rax, 0
+    jl .king_missing
+    movzx rbx, byte [side]
+    call bb_is_square_attacked
+    mov rdx, rax
+    pop rcx
+    test rdx, rdx
     jnz .remove_move
+    jmp .after_king_check
+
+.king_missing:
+    pop rcx
+    jmp .remove_move
+
+.after_king_check:
 
     ; specialna kontrola rosady: kral nesmie prechadzat cez sach
     mov rax, r12
@@ -462,7 +481,7 @@ filter_legal_moves:
     push rcx
     movzx rbx, byte [side]
     mov rax, r14
-    call is_square_attacked
+    call bb_is_square_attacked
     pop rcx
     test rax, rax
     jnz .remove_move
@@ -470,7 +489,7 @@ filter_legal_moves:
     push rcx
     movzx rbx, byte [side]
     lea rax, [r14 + r13]
-    call is_square_attacked
+    call bb_is_square_attacked
     pop rcx
     test rax, rax
     jnz .remove_move
@@ -478,7 +497,7 @@ filter_legal_moves:
     push rcx
     movzx rbx, byte [side]
     lea rax, [r14 + r13*2]
-    call is_square_attacked
+    call bb_is_square_attacked
     pop rcx
     test rax, rax
     jnz .remove_move

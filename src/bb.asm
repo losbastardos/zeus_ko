@@ -3,10 +3,10 @@
 ;
 ; Ciel: rychly is_square_attacked cez bitboardy namiesto mailbox
 ; scanu. Scaffold faza = data struktury + attack query + validacny
-; harness (bbtest); integracia do filter_legal_moves az po overeni.
+; harness (bbtest). Integracia je zapnuta v legal filter hot-path.
 ;
 ; Konvencia zhodna s legal.asm:
-;   is_square_attacked(rax=sq, rbx=side 0/8) -> rax=1 ak super napada
+;   is_square_attacked(rax=sq, rbx=side 0/1) -> rax=1 ak super napada
 ;
 ; Layout: bb_pieces[color_idx*6 + (typ-1)] = bitboard danej figury
 ;   color_idx: 0 = biely, 1 = cierny (z (piece & 8)>>3)
