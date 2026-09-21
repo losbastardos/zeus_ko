@@ -463,10 +463,14 @@ tb_parse_pairs_minlen:
     ret
 
 ; ============================================================
-; tb_try_constant_wdl - skusi priamy WDL decode pre constant setup_pairs
+; tb_try_constant_wdl - skusi priamy WDL decode z setup_pairs streamu
 ; Vstup: r13d = white non-king type (0/typ), r14d = black non-king type (0/typ)
 ; Vystup: eax = TB_WIN/TB_DRAW/TB_LOSS alebo TB_NOT_FOUND
-; Pozn.: Pouziva realny setup_pairs stream, bez hardcoded offsetov.
+; Pozn.:
+; - Constant setup_pairs dekoduje cez min_len (raw symbol).
+; - Non-constant setup_pairs dekoduje len bezpecny slice idxbits==0
+;   (v probe.c decompressor vracia priamo min_len). Pri idxbits>0
+;   ostava fallback na heuristiky v tb_probe_wdl.
 ; ============================================================
 tb_try_constant_wdl:
     push rbx
@@ -485,9 +489,17 @@ tb_try_constant_wdl:
 
     ; WDL hlavicka: byte[4] nesie split/files flags.
     movzx ebx, byte [r12 + 4]
-    and ebx, 1                    ; split flag
 
     lea rdi, [r12 + 5]            ; data start po magickej hlavicke + flags
+
+    ; Pawnless vetva (bez pesiakov): povodny decode tok, rozsireny
+    ; o bezpecny non-constant idxbits==0 slice.
+    cmp r13d, PAWN
+    je .pawn_table
+    cmp r14d, PAWN
+    je .pawn_table
+
+    and ebx, 1                    ; split flag
 
     ; piece-entry metadata pre pawnless vetvu: num + 1 bajt, potom align na parny offset
     mov ecx, 2                    ; obe kralovske figurky
@@ -511,20 +523,34 @@ tb_try_constant_wdl:
     jae .not_found
 
     ; precomp[0]
+    mov rbx, rdi
     call tb_parse_pairs_minlen
-    cmp eax, 1
-    jne .not_found                ; decode slice: zatial len constant setup_pairs
+    test eax, eax
+    jz .not_found
     mov r10d, edx                 ; min0
+    cmp eax, 2
+    jne .pc0_ok
+    movzx eax, byte [rbx + 2]      ; idxbits
+    test eax, eax
+    jnz .not_found
+.pc0_ok:
 
     test ebx, ebx
     jz .choose_done_single
 
     ; split: precomp[1]
     mov rdi, r8
+    mov rbx, rdi
     call tb_parse_pairs_minlen
-    cmp eax, 1
-    jne .not_found
+    test eax, eax
+    jz .not_found
     mov r11d, edx                 ; min1
+    cmp eax, 2
+    jne .pc1_ok
+    movzx eax, byte [rbx + 2]      ; idxbits
+    test eax, eax
+    jnz .not_found
+.pc1_ok:
 
     cmp r10d, r11d
     je .choose_min0
@@ -542,6 +568,121 @@ tb_try_constant_wdl:
 .choose_min0:
 
 .choose_done_single:
+    jmp .raw_to_class
+
+.pawn_table:
+    ; 3-piece pawn scope: KPvK/KvPK. Vyberieme setup_pairs slot
+    ; rovnako ako probe.c (file bucket + bside), ale realny variable-bit
+    ; decode (idxbits>0) zatial neriesime v tomto kroku.
+    movzx eax, byte [r12 + 4]
+    mov r11d, eax                 ; flags
+    and eax, 0x02
+    jz .not_found                 ; bez files flagu nie je nas current scope
+
+    ; files=4, split=bit0
+    mov eax, r11d
+    and eax, 1
+    mov r8d, eax                  ; split flag
+
+    ; metadata pre pawn tabulky: files * (num + s)
+    ; current scope: num=3, s=1 (jedna strana ma presne jedneho pesiaka)
+    add rdi, 16
+    mov rax, rdi
+    sub rax, r12
+    test al, 1
+    jz .pawn_aligned
+    inc rdi
+.pawn_aligned:
+    cmp rdi, rsi
+    jae .not_found
+
+    ; najdi square pesiaka v boarde a urci file bucket 0..3
+    lea rbx, [board]
+    mov ecx, PAWN
+    cmp r13d, PAWN
+    je .pawn_white
+    or ecx, BLACK
+.pawn_white:
+    mov r9d, -1
+    xor edx, edx
+.pawn_sq_scan:
+    cmp edx, 64
+    jae .pawn_sq_done
+    movzx eax, byte [rbx + rdx]
+    cmp eax, ecx
+    jne .pawn_sq_next
+    mov r9d, edx
+    jmp .pawn_sq_done
+.pawn_sq_next:
+    inc edx
+    jmp .pawn_sq_scan
+
+.pawn_sq_done:
+    cmp r9d, 0
+    jl .not_found
+    mov eax, r9d
+    and eax, 7
+    cmp eax, 3
+    jle .file_ok
+    mov edx, 7
+    sub edx, eax
+    mov eax, edx
+.file_ok:
+    mov r10d, eax                 ; file bucket 0..3
+
+    ; bside aproximacia: key match vetva v probe.c pouziva bside=!wtm
+    movzx eax, byte [side]
+    xor eax, 1
+    mov r11d, eax                 ; bside 0/1
+
+    ; target precomp index v poradi setup_pairs streamu
+    ; order: file0[pre0,pre1], file1[pre0,pre1], ... (ak split)
+    mov eax, r10d
+    shl eax, 1
+    test r8d, r8d
+    jnz .idx_add_bside
+    shr eax, 1
+    xor r11d, r11d                ; pri non-split sa pouzije precomp[0]
+.idx_add_bside:
+    add eax, r11d
+    mov r10d, eax                 ; target index
+
+    ; pocet precomp slotov
+    mov eax, 4
+    test r8d, r8d
+    jz .have_slots
+    shl eax, 1
+.have_slots:
+    mov r11d, eax                 ; slot_count
+
+    xor ecx, ecx                  ; current index
+.pawn_parse_loop:
+    cmp ecx, r11d
+    jae .not_found
+
+    mov rbx, rdi
+    call tb_parse_pairs_minlen
+    test eax, eax
+    jz .not_found
+
+    cmp ecx, r10d
+    jne .pawn_next
+
+    ; target slot: constant, alebo non-constant idxbits==0
+    mov r10d, edx                 ; vybrany raw symbol
+    cmp eax, 1
+    je .raw_to_class
+    movzx eax, byte [rbx + 2]      ; idxbits
+    test eax, eax
+    jnz .not_found
+    jmp .raw_to_class
+
+.pawn_next:
+    mov rdi, r8
+    inc ecx
+    jmp .pawn_parse_loop
+
+.raw_to_class:
     ; raw syzygy symbol -> WDL trieda: raw-2  {-2..2}
     cmp r10d, 4
     ja .not_found
