@@ -389,11 +389,15 @@ tb_validate_map_and_probe:
 ; Vystup: eax = 0 fail, 1 constant, 2 non-constant
 ;         edx = min_len
 ;         r8  = next ptr za setup_pairs
+;         r9d = num_syms (0 pre constant)
+;         r10 = sympat ptr (0 pre constant)
 ; ============================================================
 tb_parse_pairs_minlen:
     xor eax, eax
     xor edx, edx
     xor r8, r8
+    xor r9d, r9d
+    xor r10, r10
 
     test rdi, rdi
     jz .fail
@@ -410,6 +414,8 @@ tb_parse_pairs_minlen:
 
     movzx edx, byte [rdi + 1]
     lea r8, [rdi + 2]
+    xor r9d, r9d
+    xor r10, r10
     mov eax, 1
     ret
 
@@ -442,6 +448,10 @@ tb_parse_pairs_minlen:
     test r9d, r9d
     jz .fail
 
+    ; sympat zacina za hlavouri + offset[] tabulkou
+    lea r10, [rdi + 12]
+    lea r10, [r10 + rcx*2]
+
     ; next = ptr + 12 + 2*h + 3*num_syms + (num_syms & 1)
     lea r8, [rdi + 12]
     lea r8, [r8 + rcx*2]
@@ -460,6 +470,8 @@ tb_parse_pairs_minlen:
     xor eax, eax
     xor edx, edx
     xor r8, r8
+    xor r9d, r9d
+    xor r10, r10
     ret
 
 ; ============================================================
@@ -527,12 +539,18 @@ tb_try_constant_wdl:
     call tb_parse_pairs_minlen
     test eax, eax
     jz .not_found
-    mov r10d, edx                 ; min0
-    cmp eax, 2
-    jne .pc0_ok
+    cmp eax, 1
+    je .pc0_const
     movzx eax, byte [rbx + 2]      ; idxbits
     test eax, eax
-    jnz .not_found
+    jz .pc0_minlen
+    cmp r9d, 1
+    jne .not_found
+    movzx r10d, byte [r10]
+    jmp .pc0_ok
+.pc0_const:
+.pc0_minlen:
+    mov r10d, edx                 ; raw0
 .pc0_ok:
 
     test ebx, ebx
@@ -544,12 +562,18 @@ tb_try_constant_wdl:
     call tb_parse_pairs_minlen
     test eax, eax
     jz .not_found
-    mov r11d, edx                 ; min1
-    cmp eax, 2
-    jne .pc1_ok
+    cmp eax, 1
+    je .pc1_const
     movzx eax, byte [rbx + 2]      ; idxbits
     test eax, eax
-    jnz .not_found
+    jz .pc1_minlen
+    cmp r9d, 1
+    jne .not_found
+    movzx r11d, byte [r10]
+    jmp .pc1_ok
+.pc1_const:
+.pc1_minlen:
+    mov r11d, edx                 ; raw1
 .pc1_ok:
 
     cmp r10d, r11d
@@ -669,12 +693,18 @@ tb_try_constant_wdl:
     jne .pawn_next
 
     ; target slot: constant, alebo non-constant idxbits==0
-    mov r10d, edx                 ; vybrany raw symbol
     cmp eax, 1
-    je .raw_to_class
+    je .pawn_const
     movzx eax, byte [rbx + 2]      ; idxbits
     test eax, eax
-    jnz .not_found
+    jz .pawn_minlen
+    cmp r9d, 1
+    jne .not_found
+    movzx r10d, byte [r10]
+    jmp .raw_to_class
+.pawn_const:
+.pawn_minlen:
+    mov r10d, edx                 ; vybrany raw symbol
     jmp .raw_to_class
 
 .pawn_next:
