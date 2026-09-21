@@ -933,7 +933,11 @@ tb_probe_wdl:
 .kpvk_no_tempo:
     cmp r14d, 0
     jl .white_strong
-    cmp edx, r14d
+    ; Konzervativny fallback: hranicne opozicne pozicie casto vychadzaju na draw,
+    ; preto obrancovi davame +1 tempo rezervu oproti cistej vzdialenosti.
+    mov eax, r14d
+    inc eax
+    cmp edx, eax
     jle .draw
     jmp .white_strong
 
@@ -1022,7 +1026,11 @@ tb_probe_wdl:
 .kvpk_no_tempo:
     cmp r14d, 0
     jl .black_strong
-    cmp edx, r14d
+    ; Konzervativny fallback: hranicne opozicne pozicie casto vychadzaju na draw,
+    ; preto obrancovi davame +1 tempo rezervu oproti cistej vzdialenosti.
+    mov eax, r14d
+    inc eax
+    cmp edx, eax
     jle .draw
     jmp .black_strong
 
