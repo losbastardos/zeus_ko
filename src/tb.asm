@@ -384,6 +384,194 @@ tb_validate_map_and_probe:
     ret
 
 ; ============================================================
+; tb_parse_pairs_minlen - parsuje setup_pairs na presnom offsete
+; Vstup:  rdi = setup_pairs ptr, rsi = map_end ptr
+; Vystup: eax = 0 fail, 1 constant, 2 non-constant
+;         edx = min_len
+;         r8  = next ptr za setup_pairs
+; ============================================================
+tb_parse_pairs_minlen:
+    xor eax, eax
+    xor edx, edx
+    xor r8, r8
+
+    test rdi, rdi
+    jz .fail
+    cmp rdi, rsi
+    jae .fail
+
+    lea rcx, [rdi + 2]
+    cmp rcx, rsi
+    ja .fail
+
+    movzx ecx, byte [rdi]
+    test ecx, 0x80
+    jz .non_const
+
+    movzx edx, byte [rdi + 1]
+    lea r8, [rdi + 2]
+    mov eax, 1
+    ret
+
+.non_const:
+    lea rcx, [rdi + 12]
+    cmp rcx, rsi
+    ja .fail
+
+    movzx ecx, byte [rdi + 8]      ; max_len
+    movzx edx, byte [rdi + 9]      ; min_len
+    cmp ecx, edx
+    jb .fail
+
+    ; h = max_len - min_len + 1
+    sub ecx, edx
+    inc ecx
+    test ecx, ecx
+    jle .fail
+    cmp ecx, 64
+    ja .fail
+
+    ; num_syms je na [ptr + 10 + 2*h]
+    lea r8, [rdi + 10]
+    lea r8, [r8 + rcx*2]
+    lea r9, [r8 + 2]
+    cmp r9, rsi
+    ja .fail
+
+    movzx r9d, word [r8]
+    test r9d, r9d
+    jz .fail
+
+    ; next = ptr + 12 + 2*h + 3*num_syms + (num_syms & 1)
+    lea r8, [rdi + 12]
+    lea r8, [r8 + rcx*2]
+    lea rcx, [r9 + r9*2]
+    add r8, rcx
+    mov ecx, r9d
+    and ecx, 1
+    add r8, rcx
+    cmp r8, rsi
+    ja .fail
+
+    mov eax, 2
+    ret
+
+.fail:
+    xor eax, eax
+    xor edx, edx
+    xor r8, r8
+    ret
+
+; ============================================================
+; tb_try_constant_wdl - skusi priamy WDL decode pre constant setup_pairs
+; Vstup: r13d = white non-king type (0/typ), r14d = black non-king type (0/typ)
+; Vystup: eax = TB_WIN/TB_DRAW/TB_LOSS alebo TB_NOT_FOUND
+; Pozn.: Pouziva realny setup_pairs stream, bez hardcoded offsetov.
+; ============================================================
+tb_try_constant_wdl:
+    push rbx
+    push rcx
+    push r12
+    push r15
+
+    mov r12, [tb_map]
+    test r12, r12
+    jz .not_found
+    mov r15, [tb_map_size]
+    cmp r15, 16
+    jb .not_found
+
+    lea rsi, [r12 + r15]          ; map_end
+
+    ; WDL hlavicka: byte[4] nesie split/files flags.
+    movzx ebx, byte [r12 + 4]
+    and ebx, 1                    ; split flag
+
+    lea rdi, [r12 + 5]            ; data start po magickej hlavicke + flags
+
+    ; piece-entry metadata pre pawnless vetvu: num + 1 bajt, potom align na parny offset
+    mov ecx, 2                    ; obe kralovske figurky
+    test r13d, r13d
+    jz .no_white_extra
+    inc ecx
+.no_white_extra:
+    test r14d, r14d
+    jz .no_black_extra
+    inc ecx
+.no_black_extra:
+    lea rax, [rcx + 1]
+    add rdi, rax
+    mov rax, rdi
+    sub rax, r12
+    test al, 1
+    jz .aligned
+    inc rdi
+.aligned:
+    cmp rdi, rsi
+    jae .not_found
+
+    ; precomp[0]
+    call tb_parse_pairs_minlen
+    cmp eax, 1
+    jne .not_found                ; decode slice: zatial len constant setup_pairs
+    mov r10d, edx                 ; min0
+
+    test ebx, ebx
+    jz .choose_done_single
+
+    ; split: precomp[1]
+    mov rdi, r8
+    call tb_parse_pairs_minlen
+    cmp eax, 1
+    jne .not_found
+    mov r11d, edx                 ; min1
+
+    cmp r10d, r11d
+    je .choose_min0
+
+    ; Aproximacia bside vyberu pre asymetricke materialy:
+    ; pri key match vetve v syzygy probe je bside = !wtm.
+    movzx eax, byte [side]
+    test eax, eax
+    jz .choose_min1               ; white na tahu -> bside=1 -> precomp[1]
+    jmp .choose_min0              ; black na tahu -> bside=0 -> precomp[0]
+
+.choose_min1:
+    mov r10d, r11d
+
+.choose_min0:
+
+.choose_done_single:
+    ; raw syzygy symbol -> WDL trieda: raw-2  {-2..2}
+    cmp r10d, 4
+    ja .not_found
+    mov eax, r10d
+    sub eax, 2
+    cmp eax, 0
+    jg .win
+    jl .loss
+    mov eax, TB_DRAW
+    jmp .done
+
+.win:
+    mov eax, TB_WIN
+    jmp .done
+
+.loss:
+    mov eax, TB_LOSS
+    jmp .done
+
+.not_found:
+    mov eax, TB_NOT_FOUND
+
+.done:
+    pop r15
+    pop r12
+    pop rcx
+    pop rbx
+    ret
+
+; ============================================================
 ; tb_piece_char - prevedie typ figury na znak Q/R/B/N/P
 ; Vstup: edx = typ figury
 ; Vystup: al = ASCII znak alebo 0
@@ -777,6 +965,12 @@ tb_probe_wdl:
 .wdl_not_const:
     mov byte [tb_wdl_pairs_is_const], 0
 .wdl_meta_done:
+
+    ; Prvy realny decode slice: constant setup_pairs tabulky dekodujeme priamo
+    ; zo Syzygy streamu (raw symbol -> TB class), bez material heuristik.
+    call tb_try_constant_wdl
+    cmp eax, TB_NOT_FOUND
+    jne .done
 
     mov rax, [tb_map]
     mov dl, byte [rax + 4]
