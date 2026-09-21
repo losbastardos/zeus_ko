@@ -140,7 +140,7 @@ syzygy-oracle:
 tb-oracle-compare: $(TARGET_STATIC)
 	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
 	if [[ -x tests/tuning/.venv/bin/python ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
-	$(LOG_RUN) "$$PYBIN" tests/tuning/tb_oracle_compare.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --syzygy-path "$(or $(SYZ_PATH),tb)" --python "$$PYBIN" --timeout $(or $(TIMEOUT),20)
+	$(LOG_RUN) "$$PYBIN" tests/tuning/tb_oracle_compare.py --engine "$(or $(ENGINE),./$(TARGET_STATIC))" --syzygy-path "$(or $(SYZ_PATH),tb)" --python "$$PYBIN" --timeout $(or $(TIMEOUT),20) $(if $(CASES),--cases-file "$(CASES)")
 
 suite-depth-scan: $(TARGET_STATIC)
 	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \

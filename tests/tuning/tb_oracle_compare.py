@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -32,6 +33,35 @@ CASES = [
     Case("kpvk_push", "8/8/8/8/8/8/P3K3/k7 w - - 0 1"),
     Case("kvpk_hold", "8/8/8/8/8/8/p3k3/K7 b - - 0 1"),
 ]
+
+
+def load_cases(path: Path) -> list[Case]:
+    cases: list[Case] = []
+
+    for line_no, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        # Supported forms:
+        # 1) name|fen
+        # 2) fen
+        if "|" in line:
+            name_part, fen_part = line.split("|", 1)
+            name = name_part.strip()
+            fen = fen_part.strip()
+            if not name or not fen:
+                raise ValueError(f"invalid case line {line_no}: expected 'name|fen'")
+        else:
+            name = f"case_{line_no}"
+            fen = line
+
+        cases.append(Case(name=name, fen=fen))
+
+    if not cases:
+        raise ValueError(f"no valid cases loaded from {path}")
+
+    return cases
 
 
 def oracle_wdl_to_engine(wdl: int) -> int:
@@ -108,18 +138,33 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--syzygy-path", default="tb", help="Path to Syzygy tables")
     p.add_argument("--python", default=sys.executable, help="Python interpreter")
     p.add_argument("--timeout", type=int, default=20, help="Timeout per probe (seconds)")
+    p.add_argument(
+        "--cases-file",
+        default="",
+        help="Optional text file with test cases (one per line: 'name|fen' or just 'fen')",
+    )
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     fails = 0
+    cases = CASES
+
+    if args.cases_file:
+        try:
+            cases = load_cases(Path(args.cases_file))
+        except Exception as exc:
+            print(f"ERROR: failed to load cases file '{args.cases_file}': {exc}")
+            return 2
 
     print("tb oracle compare")
     print(f"engine={args.engine}")
     print(f"syzygy_path={args.syzygy_path}")
+    if args.cases_file:
+        print(f"cases_file={args.cases_file}")
 
-    for case in CASES:
+    for case in cases:
         try:
             ew, ed = run_engine(args.engine, args.syzygy_path, case.fen, args.timeout)
             ow_raw, od_raw = run_oracle(args.python, args.syzygy_path, case.fen, args.timeout)
@@ -141,7 +186,7 @@ def main() -> int:
                 f"PASS {case.name}: wdl/dtz={ew}/{ed} oracle_wdl_raw={ow_raw} oracle_dtz_raw={od_raw}"
             )
 
-    print(f"summary: failures={fails} cases={len(CASES)}")
+    print(f"summary: failures={fails} cases={len(cases)}")
     return 1 if fails else 0
 
 

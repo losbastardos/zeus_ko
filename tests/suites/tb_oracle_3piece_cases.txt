@@ -1,0 +1,14 @@
+# name|fen
+kqvk_white|8/8/8/8/8/8/4K3/k6Q w - - 0 1
+kqvk_black|8/8/8/8/8/8/4k3/K6q b - - 0 1
+kqvk_losing|8/8/8/8/8/8/4K3/k6q w - - 0 1
+krvk_white|8/8/8/8/8/8/4K3/k6R w - - 0 1
+krvk_black|8/8/8/8/8/8/4k3/K6r b - - 0 1
+krvk_losing|8/8/8/8/8/8/4K3/k6r w - - 0 1
+kbvk_draw|8/8/8/8/8/8/4K3/k6B w - - 0 1
+knvk_draw|8/8/8/8/8/8/4K3/k6N w - - 0 1
+kpvk_push|8/8/8/8/8/8/P3K3/k7 w - - 0 1
+kvpk_hold|8/8/8/8/8/8/p3k3/K7 b - - 0 1
+# Additional edge positions
+kpvk_stalemate_like|8/8/8/8/8/1k6/P7/K7 b - - 0 1
+kvpk_stalemate_like|8/8/8/8/8/1K6/p7/k7 w - - 0 1
