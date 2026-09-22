@@ -1,0 +1,5 @@
+%include "tb/probe/path_helpers.asm"
+%include "tb/probe/init_load.asm"
+%include "tb/probe/wdl_probe.asm"
+%include "tb/probe/dtz_probe.asm"
+%include "tb/probe/piece_count.asm"
