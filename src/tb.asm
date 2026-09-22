@@ -68,6 +68,7 @@ tb_wdl_debug_order_byte: resb 1   ; debug: raw order metadata byte pre WDL
 tb_dtz_debug_wk: resd 1           ; debug: WK square pre DTZ encode (alebo -1)
 tb_dtz_debug_bk: resd 1           ; debug: BK square pre DTZ encode (alebo -1)
 tb_dtz_debug_extra: resd 1        ; debug: extra square pre DTZ encode (alebo -1)
+tb_dtz_debug_target_code: resd 1  ; debug: target piece code hladany v board scan
 tb_dtz_debug_order: resd 1        ; debug: order nibble pre DTZ encode
 tb_dtz_debug_idx: resq 1          ; debug: encoded index pre DTZ decode
 tb_dtz_debug_raw_symbol: resd 1   ; debug: raw symbol z pairs decode pred map/PA
@@ -193,6 +194,7 @@ global tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 global tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
 global tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
 global tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
+global tb_dtz_debug_target_code
 global tb_dtz_debug_order, tb_dtz_debug_order_byte
 global tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
 
