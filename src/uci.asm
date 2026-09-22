@@ -72,6 +72,19 @@ uci_tbtest_wdl_idxbits: db " wdl_pairs_idxbits=", 0
 uci_tbtest_dtz_idxbits: db " dtz_pairs_idxbits=", 0
 uci_tbtest_wdl_const: db " wdl_pairs_const=", 0
 uci_tbtest_dtz_const: db " dtz_pairs_const=", 0
+uci_tbtest_wdl_order_byte: db " wdl_order_byte=", 0
+uci_tbtest_dtz_order_byte: db " dtz_order_byte=", 0
+uci_tbtest_wdl_wk: db " wdl_wk=", 0
+uci_tbtest_wdl_bk: db " wdl_bk=", 0
+uci_tbtest_wdl_extra: db " wdl_extra=", 0
+uci_tbtest_wdl_order: db " wdl_order=", 0
+uci_tbtest_wdl_idx: db " wdl_idx=", 0
+uci_tbtest_dtz_wk: db " dtz_wk=", 0
+uci_tbtest_dtz_bk: db " dtz_bk=", 0
+uci_tbtest_dtz_extra: db " dtz_extra=", 0
+uci_tbtest_dtz_order: db " dtz_order=", 0
+uci_tbtest_dtz_idx: db " dtz_idx=", 0
+uci_tbtest_dtz_raw_symbol: db " dtz_raw_symbol=", 0
 uci_bbtest_prefix: db "info string bbtest mismatches=", 0
 
 uci_log_name:      db "uci_debug.log", 0
@@ -138,6 +151,11 @@ extern tb_wdl_pairs_num_syms, tb_dtz_pairs_num_syms
 extern tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
 extern tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
 extern tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
+extern tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
+extern tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
+extern tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
+extern tb_dtz_debug_order, tb_dtz_debug_order_byte
+extern tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
 extern suite_cmd_uci
 
 ; ============================================================
@@ -2285,6 +2303,34 @@ uci_loop:
     call write_cstr
     movzx rax, byte [tb_wdl_pairs_is_const]
     call print_number
+    lea rdi, [uci_tbtest_wdl_order_byte]
+    call write_cstr
+    movzx rax, byte [tb_wdl_debug_order_byte]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_wk]
+    call write_cstr
+    mov eax, [tb_wdl_debug_wk]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_wdl_bk]
+    call write_cstr
+    mov eax, [tb_wdl_debug_bk]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_wdl_extra]
+    call write_cstr
+    mov eax, [tb_wdl_debug_extra]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_wdl_order]
+    call write_cstr
+    mov eax, [tb_wdl_debug_order]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_wdl_idx]
+    call write_cstr
+    mov rax, [tb_wdl_debug_idx]
+    call print_number
     lea rdi, [uci_tbtest_dtz_payload]
     call write_cstr
     movzx rax, byte [tb_dtz_payload_probe_byte]
@@ -2322,6 +2368,39 @@ uci_loop:
     lea rdi, [uci_tbtest_dtz_const]
     call write_cstr
     movzx rax, byte [tb_dtz_pairs_is_const]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_order_byte]
+    call write_cstr
+    movzx rax, byte [tb_dtz_debug_order_byte]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_wk]
+    call write_cstr
+    mov eax, [tb_dtz_debug_wk]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_bk]
+    call write_cstr
+    mov eax, [tb_dtz_debug_bk]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_extra]
+    call write_cstr
+    mov eax, [tb_dtz_debug_extra]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_order]
+    call write_cstr
+    mov eax, [tb_dtz_debug_order]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_idx]
+    call write_cstr
+    mov rax, [tb_dtz_debug_idx]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_raw_symbol]
+    call write_cstr
+    mov eax, [tb_dtz_debug_raw_symbol]
+    movsxd rax, eax
     call print_number
     lea rdi, [msg_newline]
     mov rdx, 1

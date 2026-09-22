@@ -19,3 +19,9 @@ A_kqvk_white_win|8/8/8/8/8/8/4Q3/K1k5 w - - 0 1
 B_krvk_white_win|k7/8/1K6/8/8/8/8/R7 w - - 0 1
 B_krvk_black_loss|k7/8/1K6/8/8/8/8/R7 b - - 0 1
 kbvk_canary_draw|k7/8/1K6/8/8/8/8/B7 w - - 0 1
+
+# P1-P4 decode diagnostika
+P1_krvk_black_to_move|k7/8/1K6/8/8/8/8/R7 b - - 0 1
+P2_kqvk_black_problem|8/5Q2/8/8/8/8/8/K1k5 b - - 0 1
+P3_kqvk_oracle_dtz5|6k1/8/4K3/8/8/8/8/Q7 w - - 0 1
+P4_kqvk_oracle_dtz9|1k6/8/8/8/6Q1/3K4/8/8 w - - 0 1

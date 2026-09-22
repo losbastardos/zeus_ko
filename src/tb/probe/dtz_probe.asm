@@ -14,6 +14,13 @@ tb_probe_dtz:
     mov byte [tb_dtz_pairs_blocksize], 0
     mov byte [tb_dtz_pairs_idxbits], 0
     mov byte [tb_dtz_pairs_is_const], 0
+    mov dword [tb_dtz_debug_wk], -1
+    mov dword [tb_dtz_debug_bk], -1
+    mov dword [tb_dtz_debug_extra], -1
+    mov dword [tb_dtz_debug_order], -1
+    mov byte [tb_dtz_debug_order_byte], 0
+    mov qword [tb_dtz_debug_idx], 0
+    mov dword [tb_dtz_debug_raw_symbol], 0
     mov byte [tb_file_path], 0
 
     ; DTZ bootstrap zatial len pre male 2-3 figurkove koncovky.
@@ -230,6 +237,7 @@ tb_try_decode_dtz_3pc:
     ; metadata byte s order nibblami
     lea rdi, [r15 + 5]
     movzx r8d, byte [rdi]
+    mov [tb_dtz_debug_order_byte], r8b
 
     ; skip piece metadata: num + 1 bajt
     mov ecx, 2
@@ -277,6 +285,7 @@ tb_try_decode_dtz_3pc:
     cmp eax, 1
     ja .nf
     mov r8d, eax
+    mov [tb_dtz_debug_order], r8d
 
     ; najdi WK/BK/extra square
     lea rdx, [board]
@@ -314,6 +323,10 @@ tb_try_decode_dtz_3pc:
     jmp .scan_board
 
 .scan_done:
+    mov [tb_dtz_debug_wk], r9d
+    mov [tb_dtz_debug_bk], r10d
+    mov [tb_dtz_debug_extra], r11d
+
     cmp r9d, 0
     jl .nf
     cmp r10d, 0
@@ -329,6 +342,7 @@ tb_try_decode_dtz_3pc:
     call tb_encode_k2_num3_idx
     test eax, eax
     jz .nf
+    mov [tb_dtz_debug_idx], rdx
 
     ; raw symbol decode
     mov rcx, rdx
@@ -339,6 +353,7 @@ tb_try_decode_dtz_3pc:
     test eax, eax
     jz .nf
     mov r8d, edx                   ; raw DTZ symbol
+    mov [tb_dtz_debug_raw_symbol], r8d
 
     ; map start = end vsetkych setup_pairs streamov (1 alebo 2 sloty)
     mov rdi, r13

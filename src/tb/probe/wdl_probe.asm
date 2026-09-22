@@ -15,6 +15,12 @@ tb_probe_wdl:
     mov byte [tb_wdl_pairs_blocksize], 0
     mov byte [tb_wdl_pairs_idxbits], 0
     mov byte [tb_wdl_pairs_is_const], 0
+    mov dword [tb_wdl_debug_wk], -1
+    mov dword [tb_wdl_debug_bk], -1
+    mov dword [tb_wdl_debug_extra], -1
+    mov dword [tb_wdl_debug_order], -1
+    mov qword [tb_wdl_debug_idx], 0
+    mov byte [tb_wdl_debug_order_byte], 0
     mov byte [tb_file_path], 0
 
     ; Tento krok je zamerany na male (2-3 figurkove) koncovky.

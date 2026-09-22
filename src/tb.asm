@@ -59,6 +59,19 @@ tb_wdl_pairs_idxbits: resb 1      ; debug: idxbits (WDL)
 tb_dtz_pairs_idxbits: resb 1      ; debug: idxbits (DTZ)
 tb_wdl_pairs_is_const: resb 1     ; debug: 1 ak constant table (WDL)
 tb_dtz_pairs_is_const: resb 1     ; debug: 1 ak constant table (DTZ)
+tb_wdl_debug_wk: resd 1           ; debug: WK square pre WDL encode (alebo -1)
+tb_wdl_debug_bk: resd 1           ; debug: BK square pre WDL encode (alebo -1)
+tb_wdl_debug_extra: resd 1        ; debug: extra square pre WDL encode (alebo -1)
+tb_wdl_debug_order: resd 1        ; debug: order nibble pre WDL encode
+tb_wdl_debug_idx: resq 1          ; debug: encoded index pre WDL decode
+tb_wdl_debug_order_byte: resb 1   ; debug: raw order metadata byte pre WDL
+tb_dtz_debug_wk: resd 1           ; debug: WK square pre DTZ encode (alebo -1)
+tb_dtz_debug_bk: resd 1           ; debug: BK square pre DTZ encode (alebo -1)
+tb_dtz_debug_extra: resd 1        ; debug: extra square pre DTZ encode (alebo -1)
+tb_dtz_debug_order: resd 1        ; debug: order nibble pre DTZ encode
+tb_dtz_debug_idx: resq 1          ; debug: encoded index pre DTZ decode
+tb_dtz_debug_raw_symbol: resd 1   ; debug: raw symbol z pairs decode pred map/PA
+tb_dtz_debug_order_byte: resb 1   ; debug: raw order metadata byte pre DTZ
 tb_sym_cache_state: resb 4096     ; 0=unknown,1=visiting,2=ok,3=mixed/invalid
 tb_sym_cache_value: resb 4096     ; cache leaf hodnot pre symboly
 tb_dec_symlen: resb 4096          ; symlen cache pre realny decode
@@ -177,6 +190,11 @@ global tb_wdl_pairs_num_syms, tb_dtz_pairs_num_syms
 global tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
 global tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
 global tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
+global tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
+global tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
+global tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
+global tb_dtz_debug_order, tb_dtz_debug_order_byte
+global tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
 
 extern board, side, halfmove
 extern generate_all_moves, is_in_check, move_count
