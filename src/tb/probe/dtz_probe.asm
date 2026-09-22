@@ -17,6 +17,7 @@ tb_probe_dtz:
     mov dword [tb_dtz_debug_wk], -1
     mov dword [tb_dtz_debug_bk], -1
     mov dword [tb_dtz_debug_extra], -1
+    mov dword [tb_dtz_debug_target_code], -1
     mov dword [tb_dtz_debug_order], -1
     mov byte [tb_dtz_debug_order_byte], 0
     mov qword [tb_dtz_debug_idx], 0
@@ -234,6 +235,16 @@ tb_try_decode_dtz_3pc:
     mov r9d, ecx
     mov [tb_dec_bside_tmp], cl
 
+    ; target piece code ako vo WDL full-decode vetve:
+    ; white extra -> TYPE, black extra -> TYPE|BLACK
+    mov ecx, r13d
+    test ecx, ecx
+    jnz .target_ready
+    mov ecx, r14d
+    or ecx, BLACK
+.target_ready:
+    mov [tb_dtz_debug_target_code], ecx
+
     ; metadata byte s order nibblami
     lea rdi, [r15 + 5]
     movzx r8d, byte [rdi]
@@ -291,14 +302,7 @@ tb_try_decode_dtz_3pc:
     lea rdx, [board]
     mov r9d, -1                   ; wk
     mov r10d, -1                  ; bk
-    test r13d, r13d
-    jz .extra_black
-    mov ecx, r13d
-    jmp .extra_ready
-.extra_black:
-    mov ecx, r14d
-    or ecx, BLACK
-.extra_ready:
+    mov ecx, [tb_dtz_debug_target_code]
     mov r11d, -1                  ; extra
     xor eax, eax
 .scan_board:

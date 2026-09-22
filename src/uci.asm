@@ -82,6 +82,7 @@ uci_tbtest_wdl_idx: db " wdl_idx=", 0
 uci_tbtest_dtz_wk: db " dtz_wk=", 0
 uci_tbtest_dtz_bk: db " dtz_bk=", 0
 uci_tbtest_dtz_extra: db " dtz_extra=", 0
+uci_tbtest_dtz_target: db " dtz_target=", 0
 uci_tbtest_dtz_order: db " dtz_order=", 0
 uci_tbtest_dtz_idx: db " dtz_idx=", 0
 uci_tbtest_dtz_raw_symbol: db " dtz_raw_symbol=", 0
@@ -154,6 +155,7 @@ extern tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 extern tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
 extern tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
 extern tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
+extern tb_dtz_debug_target_code
 extern tb_dtz_debug_order, tb_dtz_debug_order_byte
 extern tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
 extern suite_cmd_uci
@@ -2386,6 +2388,11 @@ uci_loop:
     lea rdi, [uci_tbtest_dtz_extra]
     call write_cstr
     mov eax, [tb_dtz_debug_extra]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_target]
+    call write_cstr
+    mov eax, [tb_dtz_debug_target_code]
     movsxd rax, eax
     call print_number
     lea rdi, [uci_tbtest_dtz_order]
