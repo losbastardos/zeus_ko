@@ -12,3 +12,10 @@ kvpk_hold|8/8/8/8/8/8/p3k3/K7 b - - 0 1
 # Additional edge positions
 kpvk_stalemate_like|8/8/8/8/8/1k6/P7/K7 b - - 0 1
 kvpk_stalemate_like|8/8/8/8/8/1K6/p7/k7 w - - 0 1
+
+# Orientation canaries (side-swap)
+A_kqvk_black_pat|8/8/8/8/8/8/4Q3/K1k5 b - - 0 1
+A_kqvk_white_win|8/8/8/8/8/8/4Q3/K1k5 w - - 0 1
+B_krvk_white_win|k7/8/1K6/8/8/8/8/R7 w - - 0 1
+B_krvk_black_loss|k7/8/1K6/8/8/8/8/R7 b - - 0 1
+kbvk_canary_draw|k7/8/1K6/8/8/8/8/B7 w - - 0 1

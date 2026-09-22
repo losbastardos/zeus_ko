@@ -23,6 +23,22 @@ tb_probe_wdl:
     cmp eax, 3
     jg .not_found
 
+    ; Krok 1: legal no-moves guard pred akymkolvek decode.
+    ; - stalemate: draw
+    ; - checkmate: loss
+    call generate_all_moves
+    call filter_legal_moves
+    movzx eax, word [move_count]
+    test eax, eax
+    jnz .scan_setup
+    movzx eax, byte [side]
+    call is_in_check
+    test eax, eax
+    jnz .loss
+    jmp .draw
+
+.scan_setup:
+
     lea rbx, [board]
     xor r13d, r13d          ; white non-king piece type
     xor r14d, r14d          ; black non-king piece type

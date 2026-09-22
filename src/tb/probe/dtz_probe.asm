@@ -21,6 +21,27 @@ tb_probe_dtz:
     cmp eax, 3
     jg .not_found
 
+    ; Krok 1: legal no-moves guard pred decode.
+    ; - stalemate: dtz class draw (0)
+    ; - checkmate: dtz class loss (2)
+    call generate_all_moves
+    call filter_legal_moves
+    movzx eax, word [move_count]
+    test eax, eax
+    jnz .scan_setup
+    movzx eax, byte [side]
+    call is_in_check
+    test eax, eax
+    jnz .nomoves_loss
+    xor eax, eax
+    jmp .done
+
+.nomoves_loss:
+    mov eax, 2
+    jmp .done
+
+.scan_setup:
+
     lea rbx, [board]
     xor r13d, r13d          ; white non-king piece type
     xor r14d, r14d          ; black non-king piece type
@@ -204,6 +225,7 @@ tb_try_decode_dtz_3pc:
     ; bside aproximacia ako vo WDL fallbacke: white na tahu -> bside=1
     movzx ecx, byte [side]
     mov r9d, ecx
+    mov [tb_dec_bside_tmp], cl
 
     ; metadata byte s order nibblami
     lea rdi, [r15 + 5]
@@ -337,6 +359,15 @@ tb_try_decode_dtz_3pc:
     ; mapovanie symbol->DTZ podla flags setup_pairs
     movzx eax, byte [rbx]
     mov r10d, eax
+
+    ; Krok 2: canonical gate pre nesymetricke DTZ tabulky.
+    ; Ak tabulka drzi opacny bside, vrat NOT_FOUND.
+    mov eax, r10d
+    and eax, 1
+    movzx edx, byte [tb_dec_bside_tmp]
+    cmp eax, edx
+    jne .nf
+
     test r10d, 2
     jz .mapped_ready
 
@@ -398,6 +429,19 @@ tb_try_decode_dtz_3pc:
     movzx r8d, word [rdi]
 
 .mapped_ready:
+    ; Krok 2: PA_FLAGS + (s & 1) podmienka.
+    ; s reprezentujeme konzervativne z WDL class: {-2, 0, +2}.
+    xor edx, edx                   ; s = 0 (draw)
+    cmp r12d, TB_WIN
+    jne .s_not_win
+    mov edx, 2
+    jmp .s_ready
+.s_not_win:
+    cmp r12d, TB_LOSS
+    jne .s_ready
+    mov edx, -2
+.s_ready:
+
     ; PA_FLAGS redukcia (pre nase triedy: win=4, loss=8, draw=0)
     xor ecx, ecx
     cmp r12d, TB_WIN
@@ -409,8 +453,12 @@ tb_try_decode_dtz_3pc:
     jne .pa_mask_ready
     mov ecx, 8
 .pa_mask_ready:
+    mov eax, edx
+    and eax, 1
+    jnz .pa_scale
     test r10d, ecx
     jnz .pa_done
+.pa_scale:
     shl r8d, 1
 .pa_done:
 
