@@ -337,7 +337,34 @@ tb_probe_wdl:
 .kpvk_no_tempo:
     cmp r14d, 0
     jl .white_strong
-    cmp edx, r14d
+
+    ; Pri blizkom utocnom kralovi nechajme ostrejsiu klasifikaciu.
+    mov eax, r15d
+    and eax, 7
+    sub eax, r10d
+    jns .kpvk_atk_absf
+    neg eax
+.kpvk_atk_absf:
+    mov ecx, eax
+    mov eax, r15d
+    shr eax, 3
+    sub eax, r11d
+    jns .kpvk_atk_absr
+    neg eax
+.kpvk_atk_absr:
+    cmp ecx, eax
+    jge .kpvk_atk_dist_ready
+    mov ecx, eax
+.kpvk_atk_dist_ready:
+
+    mov eax, r14d
+    cmp edx, 4
+    jg .kpvk_cmp_ready
+    cmp ecx, 1
+    jle .kpvk_cmp_ready
+    inc eax
+.kpvk_cmp_ready:
+    cmp edx, eax
     jle .draw
     jmp .white_strong
 
@@ -568,7 +595,32 @@ tb_probe_wdl:
     jle .black_strong
 
 .kvpk_cmp_strict_basic:
-    cmp edx, r14d
+
+    ; Pri blizkom utocnom kralovi nechajme ostrejsiu klasifikaciu.
+    mov eax, r8d
+    sub eax, r10d
+    jns .kvpk_atk_absf
+    neg eax
+.kvpk_atk_absf:
+    mov ecx, eax
+    mov eax, r9d
+    sub eax, r11d
+    jns .kvpk_atk_absr
+    neg eax
+.kvpk_atk_absr:
+    cmp ecx, eax
+    jge .kvpk_atk_dist_ready
+    mov ecx, eax
+.kvpk_atk_dist_ready:
+
+    mov eax, r14d
+    cmp edx, 4
+    jg .kvpk_cmp_ready
+    cmp ecx, 1
+    jle .kvpk_cmp_ready
+    inc eax
+.kvpk_cmp_ready:
+    cmp edx, eax
     jle .draw
     jmp .black_strong
 
