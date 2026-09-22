@@ -178,7 +178,7 @@ global tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
 global tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
 global tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 
-extern board, side
+extern board, side, halfmove
 extern generate_all_moves, is_in_check, move_count
 extern filter_legal_moves
 
