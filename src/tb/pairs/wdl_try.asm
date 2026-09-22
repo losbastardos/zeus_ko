@@ -35,6 +35,7 @@ tb_try_constant_wdl:
 
     ; metadata byte s order nibblami pre bside 0/1
     movzx r10d, byte [rdi]
+    mov [tb_wdl_debug_order_byte], r10b
 
     ; piece-entry metadata: num + 1 bajt, potom align na parny offset
     mov ecx, 2
@@ -75,6 +76,7 @@ tb_try_constant_wdl:
     cmp eax, 1
     ja .not_found
     mov r10d, eax
+    mov [tb_wdl_debug_order], r10d
 
     ; setup_pairs pointer podla bside (pre split=1)
     mov rbx, rdi
@@ -124,6 +126,10 @@ tb_try_constant_wdl:
     jmp .fd_scan
 
 .fd_scan_done:
+    mov [tb_wdl_debug_wk], r8d
+    mov [tb_wdl_debug_bk], r9d
+    mov [tb_wdl_debug_extra], r11d
+
     cmp r8d, 0
     jl .not_found
     cmp r9d, 0
@@ -138,6 +144,7 @@ tb_try_constant_wdl:
     call tb_encode_k2_num3_idx
     test eax, eax
     jz .not_found
+    mov [tb_wdl_debug_idx], rdx
 
     ; tb_size pre enc_type=2,num=3: 462 * 62 = 28644
     mov rcx, rdx                  ; idx
