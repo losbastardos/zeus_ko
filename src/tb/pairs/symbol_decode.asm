@@ -250,6 +250,7 @@ tb_pairs_decode_symbol_idx:
 
 .decode_main:
     mov byte [tb_dec_stage_tmp], 4
+    mov dword [tb_dec_trace_nsteps], 0
     cmp r15, r14
     mov byte [tb_dec_stage_tmp], 41
     jae .fail
@@ -277,6 +278,7 @@ tb_pairs_decode_symbol_idx:
     mov r9d, eax                   ; litidx
 
     mov rax, r8
+    mov [tb_dec_trace_mainidx], rax
     lea rdx, [rax + rax*2]
     shl rdx, 1
     add rdx, [tb_dec_indextable]
@@ -318,6 +320,8 @@ tb_pairs_decode_symbol_idx:
     jmp .lit_pos
 
 .lit_done:
+    mov [tb_dec_trace_litidx], r9d
+    mov [tb_dec_trace_block], r11d
     mov byte [tb_dec_stage_tmp], 5
     mov eax, r11d
     mov ecx, [tb_dec_blocksize]
@@ -363,6 +367,7 @@ tb_pairs_decode_symbol_idx:
     add edx, r10d                  ; sym
     cmp edx, [tb_dec_num_syms]
     jae .fail
+    mov r8d, edx                   ; sym uchovany (symlen_get cachuje r8)
 
     mov rdi, [tb_dec_sympat]
     mov esi, [tb_dec_num_syms]
@@ -397,9 +402,22 @@ tb_pairs_decode_symbol_idx:
     jmp .fail
 
 .sym_selected:
-    mov r10d, edx
+    mov r10d, r8d                  ; root sym (nie clobbered edx)
+    mov [tb_dec_trace_code_hex], rbx
+    mov [tb_dec_trace_bitcnt], ebp
+    mov [tb_dec_trace_root_sym], r10d
 
 .leaf_loop:
+    ; trace: aktualny uzol (sym) + litidx pred krokom
+    mov eax, [tb_dec_trace_nsteps]
+    cmp eax, 8
+    jae .leaf_tr0_done
+    mov ecx, eax
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    mov [rdx + rcx], r10d        ; sym
+    mov [rdx + rcx + 12], r9d    ; litidx
+.leaf_tr0_done:
     mov edx, r10d
     mov rdi, [tb_dec_sympat]
     mov esi, [tb_dec_num_syms]
@@ -416,7 +434,15 @@ tb_pairs_decode_symbol_idx:
     shl edx, 8
     movzx ebx, byte [rax]
     or edx, ebx                    ; s1
-
+    mov ebx, edx                   ; s1 uchovany (symlen_get cachuje rbx)
+    mov eax, [tb_dec_trace_nsteps]
+    cmp eax, 8
+    jae .leaf_tr1_done
+    mov ecx, eax
+    shl ecx, 5
+    lea rax, [tb_dec_trace_steps]
+    mov [rax + rcx + 4], edx     ; s1
+.leaf_tr1_done:
     mov rdi, [tb_dec_sympat]
     mov esi, [tb_dec_num_syms]
     call tb_dec_symlen_get
@@ -435,16 +461,36 @@ tb_pairs_decode_symbol_idx:
     shl ecx, 4
     mov ebx, edx
     shr ebx, 4
-    or ecx, ebx
+    or ecx, ebx                    ; s2
+    mov eax, [tb_dec_trace_nsteps]
+    cmp eax, 8
+    jae .leaf_tr2_done
+    mov edx, eax
+    shl edx, 5
+    lea rbx, [tb_dec_trace_steps]
+    mov [rbx + rdx + 8], ecx     ; s2
+    mov dword [rbx + rdx + 16], 2 ; pick = s2
+.leaf_tr2_done:
     mov r10d, ecx
+    inc dword [tb_dec_trace_nsteps]
     jmp .leaf_loop
 
 .take_s1:
-    mov r10d, edx
+    mov eax, [tb_dec_trace_nsteps]
+    cmp eax, 8
+    jae .leaf_tr3_done
+    mov ecx, eax
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    mov dword [rdx + rcx + 16], 1 ; pick = s1
+.leaf_tr3_done:
+    mov r10d, ebx                  ; s1 (nie clobbered edx)
+    inc dword [tb_dec_trace_nsteps]
     jmp .leaf_loop
 
 .leaf_ok:
     mov byte [tb_dec_stage_tmp], 0
+    mov [tb_dec_trace_leaf_sym], r10d
     lea rax, [r10 + r10*2]
     add rax, [tb_dec_sympat]
     movzx edx, byte [rax]
