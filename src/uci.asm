@@ -86,6 +86,32 @@ uci_tbtest_dtz_target: db " dtz_target=", 0
 uci_tbtest_dtz_order: db " dtz_order=", 0
 uci_tbtest_dtz_idx: db " dtz_idx=", 0
 uci_tbtest_dtz_raw_symbol: db " dtz_raw_symbol=", 0
+uci_tbtest_dtz_helper_ret: db " dtz_helper_ret=", 0
+uci_tbtest_dtz_helper_ok: db " dtz_helper_ok=", 0
+uci_tbtest_dtz_nf_code: db " dtz_nf_code=", 0
+uci_tbtest_dtz_bside: db " dtz_bside=", 0
+uci_tbtest_dtz_flags1: db " dtz_flags1=", 0
+uci_tbtest_dtz_minlen: db " dtz_min_len=", 0
+uci_tbtest_dtz_tbsize: db " dtz_tb_size=", 0
+uci_tbtest_dtz_ptr_wdl_i: db " dtz_ptr_wdl_i=", 0
+uci_tbtest_dtz_ptr_wdl_s: db " dtz_ptr_wdl_s=", 0
+uci_tbtest_dtz_ptr_wdl_d: db " dtz_ptr_wdl_d=", 0
+uci_tbtest_dtz_ptr_dtz_i: db " dtz_ptr_dtz_i=", 0
+uci_tbtest_dtz_ptr_dtz_s: db " dtz_ptr_dtz_s=", 0
+uci_tbtest_dtz_ptr_dtz_d: db " dtz_ptr_dtz_d=", 0
+uci_tbtest_dec_mainidx: db " dec_mainidx=", 0
+uci_tbtest_dec_litidx: db " dec_litidx=", 0
+uci_tbtest_dec_block: db " dec_block=", 0
+uci_tbtest_dec_bitcnt: db " dec_bitcnt=", 0
+uci_tbtest_dec_code_hex: db " dec_code_hex=", 0
+uci_tbtest_dec_root_sym: db " dec_root_sym=", 0
+uci_tbtest_dec_leaf_sym: db " dec_leaf_sym=", 0
+uci_tbtest_dec_step: db "info string dec_step ", 0
+uci_tbtest_dec_step_sym: db " sym=", 0
+uci_tbtest_dec_step_s1: db " s1=", 0
+uci_tbtest_dec_step_s2: db " s2=", 0
+uci_tbtest_dec_step_lit: db " lit=", 0
+uci_tbtest_dec_step_pick: db " pick=", 0
 uci_bbtest_prefix: db "info string bbtest mismatches=", 0
 
 uci_log_name:      db "uci_debug.log", 0
@@ -158,6 +184,15 @@ extern tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
 extern tb_dtz_debug_target_code
 extern tb_dtz_debug_order, tb_dtz_debug_order_byte
 extern tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
+extern tb_dtz_debug_helper_ret, tb_dtz_debug_helper_ok
+extern tb_dtz_debug_nf_code, tb_dtz_debug_bside_used, tb_dtz_debug_flags1
+extern tb_dtz_debug_tb_size, tb_dtz_debug_min_len
+extern tb_dtz_debug_ptr_wdl_index, tb_dtz_debug_ptr_wdl_size, tb_dtz_debug_ptr_wdl_data
+extern tb_dtz_debug_ptr_dtz_index, tb_dtz_debug_ptr_dtz_size, tb_dtz_debug_ptr_dtz_data
+extern tb_dec_trace_mainidx, tb_dec_trace_litidx, tb_dec_trace_block
+extern tb_dec_trace_bitcnt, tb_dec_trace_root_sym, tb_dec_trace_leaf_sym
+extern tb_dec_trace_code_hex
+extern tb_dec_trace_nsteps, tb_dec_trace_steps
 extern suite_cmd_uci
 
 ; ============================================================
@@ -2409,9 +2444,152 @@ uci_loop:
     mov eax, [tb_dtz_debug_raw_symbol]
     movsxd rax, eax
     call print_number
+    lea rdi, [uci_tbtest_dtz_helper_ret]
+    call write_cstr
+    mov eax, [tb_dtz_debug_helper_ret]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_helper_ok]
+    call write_cstr
+    movzx rax, byte [tb_dtz_debug_helper_ok]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_nf_code]
+    call write_cstr
+    mov eax, [tb_dtz_debug_nf_code]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_bside]
+    call write_cstr
+    mov eax, [tb_dtz_debug_bside_used]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_flags1]
+    call write_cstr
+    mov eax, [tb_dtz_debug_flags1]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_minlen]
+    call write_cstr
+    mov eax, [tb_dtz_debug_min_len]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_tbsize]
+    call write_cstr
+    mov eax, [tb_dtz_debug_tb_size]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_wdl_i]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_wdl_index]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_wdl_s]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_wdl_size]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_wdl_d]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_wdl_data]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_dtz_i]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_dtz_index]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_dtz_s]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_dtz_size]
+    call print_number
+    lea rdi, [uci_tbtest_dtz_ptr_dtz_d]
+    call write_cstr
+    mov rax, [tb_dtz_debug_ptr_dtz_data]
+    call print_number
+    lea rdi, [uci_tbtest_dec_mainidx]
+    call write_cstr
+    mov rax, [tb_dec_trace_mainidx]
+    call print_number
+    lea rdi, [uci_tbtest_dec_litidx]
+    call write_cstr
+    mov eax, [tb_dec_trace_litidx]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dec_block]
+    call write_cstr
+    mov eax, [tb_dec_trace_block]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dec_bitcnt]
+    call write_cstr
+    mov eax, [tb_dec_trace_bitcnt]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dec_code_hex]
+    call write_cstr
+    mov rax, [tb_dec_trace_code_hex]
+    call print_number
+    lea rdi, [uci_tbtest_dec_root_sym]
+    call write_cstr
+    mov eax, [tb_dec_trace_root_sym]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_tbtest_dec_leaf_sym]
+    call write_cstr
+    mov eax, [tb_dec_trace_leaf_sym]
+    movsxd rax, eax
+    call print_number
     lea rdi, [msg_newline]
     mov rdx, 1
     call write_str
+    ; per-step walk trace (max 8 krokov child traversalu)
+    xor r12d, r12d
+.dec_step_loop:
+    cmp r12d, [tb_dec_trace_nsteps]
+    jae .dec_step_done
+    cmp r12d, 8
+    jae .dec_step_done
+    lea rdi, [uci_tbtest_dec_step]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    lea rdi, [uci_tbtest_dec_step_sym]
+    call write_cstr
+    mov ecx, r12d
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    movsxd rax, dword [rdx + rcx]
+    call print_number
+    lea rdi, [uci_tbtest_dec_step_s1]
+    call write_cstr
+    mov ecx, r12d
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    movsxd rax, dword [rdx + rcx + 4]
+    call print_number
+    lea rdi, [uci_tbtest_dec_step_s2]
+    call write_cstr
+    mov ecx, r12d
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    movsxd rax, dword [rdx + rcx + 8]
+    call print_number
+    lea rdi, [uci_tbtest_dec_step_lit]
+    call write_cstr
+    mov ecx, r12d
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    movsxd rax, dword [rdx + rcx + 12]
+    call print_number
+    lea rdi, [uci_tbtest_dec_step_pick]
+    call write_cstr
+    mov ecx, r12d
+    shl ecx, 5
+    lea rdx, [tb_dec_trace_steps]
+    movsxd rax, dword [rdx + rcx + 16]
+    call print_number
+    lea rdi, [msg_newline]
+    mov rdx, 1
+    call write_str
+    inc r12d
+    jmp .dec_step_loop
+.dec_step_done:
     jmp .loop
 
 .bbtest:

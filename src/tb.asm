@@ -121,6 +121,15 @@ tb_dec_override_data: resq 1
 tb_dec_slot_size0: resq 8
 tb_dec_slot_size1: resq 8
 tb_dec_slot_size2: resq 8
+tb_dec_trace_mainidx: resq 1
+tb_dec_trace_litidx: resd 1
+tb_dec_trace_block: resd 1
+tb_dec_trace_bitcnt: resd 1
+tb_dec_trace_root_sym: resd 1
+tb_dec_trace_leaf_sym: resd 1
+tb_dec_trace_code_hex: resq 1
+tb_dec_trace_nsteps: resd 1
+tb_dec_trace_steps: resd 64    ; 8 krokov x 8 dword: sym, s1, s2, litidx, pick, -, -, -
 
 section .rodata
 
@@ -240,6 +249,10 @@ global tb_dtz_debug_tb_size, tb_dtz_debug_min_len, tb_dtz_debug_flags
 global tb_dtz_debug_ptr_wdl_index, tb_dtz_debug_ptr_wdl_size, tb_dtz_debug_ptr_wdl_data
 global tb_dtz_debug_ptr_dtz_index, tb_dtz_debug_ptr_dtz_size, tb_dtz_debug_ptr_dtz_data
 global tb_dtz_debug_headers_start
+global tb_dec_trace_mainidx, tb_dec_trace_litidx, tb_dec_trace_block
+global tb_dec_trace_bitcnt, tb_dec_trace_root_sym, tb_dec_trace_leaf_sym
+global tb_dec_trace_code_hex
+global tb_dec_trace_nsteps, tb_dec_trace_steps
 
 extern board, side, halfmove
 extern generate_all_moves, is_in_check, move_count
