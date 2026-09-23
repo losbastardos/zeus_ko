@@ -225,7 +225,8 @@ tb_probe_dtz:
 ; ============================================================
 ; tb_try_decode_dtz_3pc - realny decode pre 3-piece pawnless DTZ
 ; Vstup: r12d = WDL class (TB_LOSS/TB_DRAW/TB_WIN), r13d/r14d material
-; Vystup: eax = signed DTZ (STM perspektiva) alebo TB_NOT_FOUND
+; Vystup: eax = signed DTZ v semantics python-chess probe_dtz (recursive,
+;          STM perspektiva), alebo TB_NOT_FOUND/DTZ_UNSUPPORTED
 ; ============================================================
 tb_try_decode_dtz_3pc:
     push rbx
@@ -308,6 +309,84 @@ tb_try_decode_dtz_3pc:
     jae .nf_102
     mov rbx, rdi                  ; setup_pairs ptr pre decode
 
+    ; p_map = next pointer za precomp setup_pairs streamom
+    mov rdi, rbx
+    mov rsi, r14
+    call tb_parse_pairs_minlen
+    test eax, eax
+    jz .nf_109
+    mov r9, r8
+
+    ; vypocitaj realne pointery pre indextable/sizetable/data v .rtbz:
+    ; su za map sekciou, nie hned za setup_pairs streamom.
+    mov rdi, r9
+    movzx eax, byte [rbx]
+    test eax, 2
+    jz .maps_done
+    test eax, 16
+    jnz .maps_u16
+
+    mov ecx, 4
+.maps_u8_loop:
+    cmp rdi, r14
+    jae .nf
+    movzx eax, byte [rdi]
+    lea rdi, [rdi + rax + 1]
+    dec ecx
+    jnz .maps_u8_loop
+    jmp .maps_done
+
+.maps_u16:
+    mov ecx, 4
+.maps_u16_loop:
+    lea rax, [rdi + 2]
+    cmp rax, r14
+    ja .nf
+    movzx eax, word [rdi]
+    lea rdi, [rdi + 2 + rax*2]
+    dec ecx
+    jnz .maps_u16_loop
+
+.maps_done:
+    mov rax, rdi
+    sub rax, r15
+    test al, 1
+    jz .tables_ready
+    inc rdi
+
+.tables_ready:
+    ; size0 = 6 * num_indices, size1 = 2 * num_blocks
+    movzx ecx, byte [rbx + 2]      ; idxbits
+    cmp ecx, 31
+    ja .nf
+    mov eax, 31332
+    mov rdx, 1
+    shl rdx, cl
+    dec rdx
+    add rax, rdx
+    shr rax, cl                     ; num_indices
+    test rax, rax
+    jz .nf
+    mov r10, rax
+    imul r10, r10, 6                ; size0
+
+    mov eax, dword [rbx + 4]        ; real blocks
+    movzx edx, byte [rbx + 3]       ; extra blocks
+    add eax, edx
+    mov r11d, eax
+    mov rax, r11
+    shl rax, 1                       ; size1
+    mov r8, rax
+
+    mov [tb_dec_override_indextable], rdi
+    lea rax, [rdi + r10]
+    mov [tb_dec_override_sizetable], rax
+    add rax, r8
+    add rax, 63
+    and rax, -64
+    mov [tb_dec_override_data], rax
+    mov byte [tb_dec_override_ptrs], 1
+
     ; najdi WK/BK/extra square
     lea rdx, [board]
     mov r9d, -1                   ; wk
@@ -371,14 +450,6 @@ tb_try_decode_dtz_3pc:
     mov dword [tb_dtz_debug_tb_size], 31332
     mov eax, [tb_dec_min_len]
     mov [tb_dtz_debug_min_len], eax
-
-    ; p_map je next pointer za precomp setup_pairs streamom
-    mov rdi, rbx
-    mov rsi, r14
-    call tb_parse_pairs_minlen
-    test eax, eax
-    jz .nf_109
-    mov r9, r8
 
     ; mapovanie symbol->DTZ podla flags setup_pairs
     movzx eax, byte [rbx]
@@ -523,7 +594,8 @@ tb_try_decode_dtz_3pc:
 
 .nf_g1:
     mov dword [tb_dtz_debug_nf_code], 101
-    jmp .nf
+    mov eax, DTZ_UNSUPPORTED
+    jmp .done
 
 .nf_102:
     mov dword [tb_dtz_debug_nf_code], 102
