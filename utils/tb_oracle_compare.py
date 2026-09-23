@@ -269,16 +269,12 @@ def main() -> int:
                     else:
                         dtz_mismatch = False
 
-                    unsupported_mismatch = (not stored_side) and (ed != args.dtz_unsupported)
+                    unsupported_note = (not stored_side) and (ed != args.dtz_unsupported)
 
-                    if wdl_mismatch or dtz_mismatch or unsupported_mismatch:
+                    if wdl_mismatch or dtz_mismatch:
                         mismatches += 1
                         variant_mismatch += 1
-                        if unsupported_mismatch:
-                            both_total += 1
-                            variant_both += 1
-                            mismatch_kind = "unsupported_sentinel"
-                        elif wdl_mismatch and dtz_mismatch:
+                        if wdl_mismatch and dtz_mismatch:
                             both_total += 1
                             variant_both += 1
                             mismatch_kind = "both"
@@ -300,6 +296,7 @@ def main() -> int:
                             f" oracle_recursive_dtz={od_recursive}"
                             f" stored_side={int(stored_side)}"
                             f" expected={ow}/{od_recursive if stored_side else args.dtz_unsupported}"
+                            f" unsupported_note={int(unsupported_note)}"
                             f" fen={fen}"
                         )
                         if mismatches >= args.max_mismatches:
