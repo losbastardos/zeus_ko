@@ -22,6 +22,22 @@ tb_probe_dtz:
     mov byte [tb_dtz_debug_order_byte], 0
     mov qword [tb_dtz_debug_idx], 0
     mov dword [tb_dtz_debug_raw_symbol], 0
+    mov dword [tb_dtz_debug_helper_ret], TB_NOT_FOUND
+    mov byte [tb_dtz_debug_helper_ok], 0
+    mov dword [tb_dtz_debug_nf_code], 0
+    mov dword [tb_dtz_debug_bside_used], -1
+    mov dword [tb_dtz_debug_flags1], -1
+    mov dword [tb_dtz_debug_slot_count], 1
+    mov dword [tb_dtz_debug_tb_size], 0
+    mov dword [tb_dtz_debug_min_len], 0
+    mov dword [tb_dtz_debug_flags], 0
+    mov qword [tb_dtz_debug_ptr_wdl_index], 0
+    mov qword [tb_dtz_debug_ptr_wdl_size], 0
+    mov qword [tb_dtz_debug_ptr_wdl_data], 0
+    mov qword [tb_dtz_debug_ptr_dtz_index], 0
+    mov qword [tb_dtz_debug_ptr_dtz_size], 0
+    mov qword [tb_dtz_debug_ptr_dtz_data], 0
+    mov qword [tb_dtz_debug_headers_start], 0
     mov byte [tb_file_path], 0
 
     ; DTZ bootstrap zatial len pre male 2-3 figurkove koncovky.
@@ -84,6 +100,12 @@ tb_probe_dtz:
     ; DTZ map_bytes/path diagnostiky.
     call tb_probe_wdl
     mov r12d, eax
+    mov rax, [tb_dec_indextable]
+    mov [tb_dtz_debug_ptr_wdl_index], rax
+    mov rax, [tb_dec_sizetable]
+    mov [tb_dtz_debug_ptr_wdl_size], rax
+    mov rax, [tb_dec_data]
+    mov [tb_dtz_debug_ptr_wdl_data], rax
 
     ; Postav cestu podla materialu, potom prepni suffix na .rtbz.
     call tb_build_wdl_path
@@ -118,6 +140,12 @@ tb_probe_dtz:
     call tb_ensure_loaded_path
     test eax, eax
     jnz .not_found
+    mov rax, [tb_dec_indextable]
+    mov [tb_dtz_debug_ptr_dtz_index], rax
+    mov rax, [tb_dec_sizetable]
+    mov [tb_dtz_debug_ptr_dtz_size], rax
+    mov rax, [tb_dec_data]
+    mov [tb_dtz_debug_ptr_dtz_data], rax
 
     ; Syzygy regular DTZ magic guard + payload probe byte
     mov rdi, [tb_map]
@@ -156,6 +184,10 @@ tb_probe_dtz:
     ; Ak decode zlyha, fallback je konzervativna klasifikacia podla WDL
     ; (bez threshold heuristik pre KPvK/KvPK).
     call tb_try_decode_dtz_3pc
+    mov [tb_dtz_debug_helper_ret], eax
+    cmp eax, TB_NOT_FOUND
+    sete byte [tb_dtz_debug_helper_ok]
+    xor byte [tb_dtz_debug_helper_ok], 1
     cmp eax, TB_NOT_FOUND
     jne .done
 
@@ -193,7 +225,7 @@ tb_probe_dtz:
 ; ============================================================
 ; tb_try_decode_dtz_3pc - realny decode pre 3-piece pawnless DTZ
 ; Vstup: r12d = WDL class (TB_LOSS/TB_DRAW/TB_WIN), r13d/r14d material
-; Vystup: eax = dtz class (0 draw,1 win,2 loss) alebo TB_NOT_FOUND
+; Vystup: eax = signed DTZ (STM perspektiva) alebo TB_NOT_FOUND
 ; ============================================================
 tb_try_decode_dtz_3pc:
     push rbx
@@ -208,6 +240,7 @@ tb_try_decode_dtz_3pc:
     push r13
     push r14
     push r15
+    push rbp
 
     ; scope: iba KQ/KR/KB/KN vs K (a opacne), bez pesiakov
     cmp r13d, PAWN
@@ -226,14 +259,16 @@ tb_try_decode_dtz_3pc:
     jb .nf
     lea r14, [r15 + rax]          ; map_end
 
-    ; flags byte map[4]
+    ; Header flags (.rtbz data[4])
     movzx eax, byte [r15 + 4]
     mov ebx, eax
+    mov dword [tb_dtz_debug_slot_count], 1
 
-    ; bside aproximacia ako vo WDL fallbacke: white na tahu -> bside=1
+    ; bside pre key-match vetvu bez cmirror/mirror: bside = side
     movzx ecx, byte [side]
     mov r9d, ecx
     mov [tb_dec_bside_tmp], cl
+    mov [tb_dtz_debug_bside_used], r9d
 
     ; target piece code ako vo WDL full-decode vetve:
     ; white extra -> TYPE, black extra -> TYPE|BLACK
@@ -245,58 +280,33 @@ tb_try_decode_dtz_3pc:
 .target_ready:
     mov [tb_dtz_debug_target_code], ecx
 
-    ; metadata byte s order nibblami
-    lea rdi, [r15 + 5]
-    movzx r8d, byte [rdi]
-    mov [tb_dtz_debug_order_byte], r8b
+    ; p_data pre DTZ piece metadata (python init_table_dtz, non-pawn):
+    ; start = map+5 (bez split precomp streamu pred pieces).
+    lea rbx, [r15 + 5]
+    cmp rbx, r14
+    jae .nf_102
 
-    ; skip piece metadata: num + 1 bajt
-    mov ecx, 2
-    test r13d, r13d
-    jz .no_white_extra
-    inc ecx
-.no_white_extra:
-    test r14d, r14d
-    jz .no_black_extra
-    inc ecx
-.no_black_extra:
-    lea rax, [rcx + 1]
-    add rdi, rax
+    cmp rbx, r14
+    jae .nf_102
+    mov [tb_dtz_debug_headers_start], rbx
+
+    movzx eax, byte [rbx]
+    mov [tb_dtz_debug_order_byte], al
+    and eax, 0x0f
+    mov [tb_dtz_debug_order], eax
+
+    ; precomp setup_pairs zacina za piece metadata: num(3)+1 bajt, align na parny offset
+    lea rdi, [rbx + 4]
     mov rax, rdi
     sub rax, r15
     test al, 1
-    jz .setup_aligned
+    jz .have_setup
     inc rdi
-.setup_aligned:
-    cmp rdi, r14
-    jae .nf
 
-    mov r13, rdi                  ; headers_start (prvy setup_pairs)
-
-    ; split = bit0, pri bside=1 treba prejst na druhy setup stream
-    mov rbx, rdi
-    test ebx, 1
-    jz .have_setup
-    test r9d, r9d
-    jz .have_setup
-    mov rdi, rbx
-    call tb_parse_pairs_minlen
-    test eax, eax
-    jz .nf
-    mov rbx, r8
 .have_setup:
-
-    ; order nibble pre zvoleny bside
-    mov eax, r8d
-    test r9d, r9d
-    jz .order_low
-    shr eax, 4
-.order_low:
-    and eax, 0x0f
-    cmp eax, 1
-    ja .nf
-    mov r8d, eax
-    mov [tb_dtz_debug_order], r8d
+    cmp rdi, r14
+    jae .nf_102
+    mov rbx, rdi                  ; setup_pairs ptr pre decode
 
     ; najdi WK/BK/extra square
     lea rdx, [board]
@@ -332,60 +342,57 @@ tb_try_decode_dtz_3pc:
     mov [tb_dtz_debug_extra], r11d
 
     cmp r9d, 0
-    jl .nf
+    jl .nf_105
     cmp r10d, 0
-    jl .nf
+    jl .nf_106
     cmp r11d, 0
-    jl .nf
+    jl .nf_107
 
     ; idx pre setup_pairs decode
     mov edi, r9d
     mov esi, r10d
     mov edx, r11d
-    mov ecx, r8d
-    call tb_encode_k2_num3_idx
+    call tb_encode_111_num3_idx
     test eax, eax
-    jz .nf
+    jz .nf_108
     mov [tb_dtz_debug_idx], rdx
 
     ; raw symbol decode
     mov rcx, rdx
     mov rdi, rbx
     mov rsi, r14
-    mov rdx, 28644
+    mov rdx, 31332
     call tb_pairs_decode_symbol_idx
     test eax, eax
-    jz .nf
+    jz .nf_g3
     mov r8d, edx                   ; raw DTZ symbol
+    mov ebp, r8d                   ; pracovna kopia symbolu (call moze clobber r8)
     mov [tb_dtz_debug_raw_symbol], r8d
+    mov dword [tb_dtz_debug_tb_size], 31332
+    mov eax, [tb_dec_min_len]
+    mov [tb_dtz_debug_min_len], eax
 
-    ; map start = end vsetkych setup_pairs streamov (1 alebo 2 sloty)
-    mov rdi, r13
-    mov ecx, 1
-    test ebx, 1
-    jz .pmap_iter
-    mov ecx, 2
-.pmap_iter:
+    ; p_map je next pointer za precomp setup_pairs streamom
+    mov rdi, rbx
+    mov rsi, r14
     call tb_parse_pairs_minlen
     test eax, eax
-    jz .nf
-    mov rdi, r8
-    dec ecx
-    jnz .pmap_iter
-    mov r9, rdi
-.have_pmap:
+    jz .nf_109
+    mov r9, r8
 
     ; mapovanie symbol->DTZ podla flags setup_pairs
     movzx eax, byte [rbx]
     mov r10d, eax
+    mov [tb_dtz_debug_flags], r10d
 
     ; Krok 2: canonical gate pre nesymetricke DTZ tabulky.
     ; Ak tabulka drzi opacny bside, vrat NOT_FOUND.
     mov eax, r10d
     and eax, 1
+    mov [tb_dtz_debug_flags1], eax
     movzx edx, byte [tb_dec_bside_tmp]
     cmp eax, edx
-    jne .nf
+    jne .nf_g1
 
     test r10d, 2
     jz .mapped_ready
@@ -416,9 +423,9 @@ tb_try_decode_dtz_3pc:
     jae .nf
     movzx eax, byte [rdi]
     lea rdi, [rdi + 1]
-    cmp r8d, eax
+    cmp ebp, eax
     jae .nf
-    movzx r8d, byte [rdi + r8]
+    movzx ebp, byte [rdi + rbp]
     jmp .mapped_ready
 
 .map_u16:
@@ -439,13 +446,13 @@ tb_try_decode_dtz_3pc:
     cmp rax, r14
     ja .nf
     movzx eax, word [rdi]
-    cmp r8d, eax
+    cmp ebp, eax
     jae .nf
-    lea rdi, [rdi + 2 + r8*2]
+    lea rdi, [rdi + 2 + rbp*2]
     lea rax, [rdi + 2]
     cmp rax, r14
     ja .nf
-    movzx r8d, word [rdi]
+    movzx ebp, word [rdi]
 
 .mapped_ready:
     ; Krok 2: PA_FLAGS + (s & 1) podmienka.
@@ -478,42 +485,28 @@ tb_try_decode_dtz_3pc:
     test r10d, ecx
     jnz .pa_done
 .pa_scale:
-    shl r8d, 1
+    shl ebp, 1
 .pa_done:
 
-    ; signed DTZ priblizenie: win = +(1+res), loss = -(1+res), draw = 0
+    ; signed DTZ: win = +(1+res), loss = -(1+res), draw = 0
     cmp r12d, TB_DRAW
-    je .signed_ready
-    mov eax, r8d
+    je .signed_draw
+    mov eax, ebp
     add eax, 1
-    cmp r12d, TB_WIN
-    je .have_signed
+    cmp r12d, TB_LOSS
+    jne .done
     neg eax
-    jmp .have_signed
-.signed_ready:
-    xor eax, eax
-.have_signed:
-
-    call tb_dtz_to_wdl_class
-    cmp eax, TB_WIN
-    je .ret_win
-    cmp eax, TB_LOSS
-    je .ret_loss
-    xor eax, eax
     jmp .done
 
-.ret_win:
-    mov eax, 1
-    jmp .done
-
-.ret_loss:
-    mov eax, 2
+.signed_draw:
+    xor eax, eax
     jmp .done
 
 .nf:
     mov eax, TB_NOT_FOUND
 
 .done:
+    pop rbp
     pop r15
     pop r14
     pop r13
@@ -527,6 +520,46 @@ tb_try_decode_dtz_3pc:
     pop rcx
     pop rbx
     ret
+
+.nf_g1:
+    mov dword [tb_dtz_debug_nf_code], 101
+    jmp .nf
+
+.nf_102:
+    mov dword [tb_dtz_debug_nf_code], 102
+    jmp .nf
+
+.nf_103:
+    mov dword [tb_dtz_debug_nf_code], 103
+    jmp .nf
+
+.nf_104:
+    mov dword [tb_dtz_debug_nf_code], 104
+    jmp .nf
+
+.nf_105:
+    mov dword [tb_dtz_debug_nf_code], 105
+    jmp .nf
+
+.nf_106:
+    mov dword [tb_dtz_debug_nf_code], 106
+    jmp .nf
+
+.nf_107:
+    mov dword [tb_dtz_debug_nf_code], 107
+    jmp .nf
+
+.nf_108:
+    mov dword [tb_dtz_debug_nf_code], 108
+    jmp .nf
+
+.nf_109:
+    mov dword [tb_dtz_debug_nf_code], 109
+    jmp .nf
+
+.nf_g3:
+    mov dword [tb_dtz_debug_nf_code], 301
+    jmp .nf
 
 ; ============================================================
 ; tb_dtz_to_wdl_class - signed DTZ + halfmove -> WDL trieda

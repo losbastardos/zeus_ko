@@ -73,6 +73,22 @@ tb_dtz_debug_order: resd 1        ; debug: order nibble pre DTZ encode
 tb_dtz_debug_idx: resq 1          ; debug: encoded index pre DTZ decode
 tb_dtz_debug_raw_symbol: resd 1   ; debug: raw symbol z pairs decode pred map/PA
 tb_dtz_debug_order_byte: resb 1   ; debug: raw order metadata byte pre DTZ
+tb_dtz_debug_helper_ret: resd 1   ; debug: eax hned po call tb_try_decode_dtz_3pc
+tb_dtz_debug_helper_ok: resb 1    ; debug: 1 ak helper vratil hodnotu != TB_NOT_FOUND
+tb_dtz_debug_nf_code: resd 1      ; debug: posledny dovod .nf (G1..G4 + pomocne)
+tb_dtz_debug_bside_used: resd 1   ; debug: bside pouzity helperom
+tb_dtz_debug_flags1: resd 1       ; debug: flags & 1
+tb_dtz_debug_slot_count: resd 1   ; debug: pocet setup_pairs slotov pre pmap_iter
+tb_dtz_debug_tb_size: resd 1      ; debug: pouzity tb_size pri decode
+tb_dtz_debug_min_len: resd 1      ; debug: min_len zo setup_pairs decode
+tb_dtz_debug_flags: resd 1        ; debug: flags setup_pairs bajt
+tb_dtz_debug_ptr_wdl_index: resq 1 ; debug: tb_dec_indextable po tb_probe_wdl
+tb_dtz_debug_ptr_wdl_size: resq 1  ; debug: tb_dec_sizetable po tb_probe_wdl
+tb_dtz_debug_ptr_wdl_data: resq 1  ; debug: tb_dec_data po tb_probe_wdl
+tb_dtz_debug_ptr_dtz_index: resq 1 ; debug: tb_dec_indextable po remape .rtbz
+tb_dtz_debug_ptr_dtz_size: resq 1  ; debug: tb_dec_sizetable po remape .rtbz
+tb_dtz_debug_ptr_dtz_data: resq 1  ; debug: tb_dec_data po remape .rtbz
+tb_dtz_debug_headers_start: resq 1 ; debug: headers_start pre DTZ pmap iter
 tb_sym_cache_state: resb 4096     ; 0=unknown,1=visiting,2=ok,3=mixed/invalid
 tb_sym_cache_value: resb 4096     ; cache leaf hodnot pre symboly
 tb_dec_symlen: resb 4096          ; symlen cache pre realny decode
@@ -127,6 +143,26 @@ tb_triangle:
     db 1,3,8,5,5,8,3,1
     db 0,7,3,4,4,3,7,0
     db 6,0,1,2,2,1,0,6
+
+tb_lower:
+    db 28,0,1,2,3,4,5,6
+    db 0,29,7,8,9,10,11,12
+    db 1,7,30,13,14,15,16,17
+    db 2,8,13,31,18,19,20,21
+    db 3,9,14,18,32,22,23,24
+    db 4,10,15,19,22,33,25,26
+    db 5,11,16,20,23,25,34,27
+    db 6,12,17,21,24,26,27,35
+
+tb_diag:
+    db 0,0,0,0,0,0,0,8
+    db 0,1,0,0,0,0,9,0
+    db 0,0,2,0,0,10,0,0
+    db 0,0,0,3,11,0,0,0
+    db 0,0,0,12,4,0,0,0
+    db 0,0,13,0,0,5,0,0
+    db 0,14,0,0,0,0,6,0
+    db 15,0,0,0,0,0,0,7
 
 tb_flipdiag:
     db 0,8,16,24,32,40,48,56
@@ -197,6 +233,13 @@ global tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
 global tb_dtz_debug_target_code
 global tb_dtz_debug_order, tb_dtz_debug_order_byte
 global tb_dtz_debug_idx, tb_dtz_debug_raw_symbol
+global tb_dtz_debug_helper_ret, tb_dtz_debug_helper_ok
+global tb_dtz_debug_nf_code, tb_dtz_debug_bside_used, tb_dtz_debug_flags1
+global tb_dtz_debug_slot_count
+global tb_dtz_debug_tb_size, tb_dtz_debug_min_len, tb_dtz_debug_flags
+global tb_dtz_debug_ptr_wdl_index, tb_dtz_debug_ptr_wdl_size, tb_dtz_debug_ptr_wdl_data
+global tb_dtz_debug_ptr_dtz_index, tb_dtz_debug_ptr_dtz_size, tb_dtz_debug_ptr_dtz_data
+global tb_dtz_debug_headers_start
 
 extern board, side, halfmove
 extern generate_all_moves, is_in_check, move_count

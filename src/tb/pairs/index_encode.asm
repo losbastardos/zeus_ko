@@ -305,6 +305,158 @@ tb_encode_pawn1_num3_idx:
     ret
 
 ; ============================================================
+; tb_encode_111_num3_idx - idx pre enc_type=0 (111), num=3
+; Vstup: edi = sq0, esi = sq1, edx = sq2 (poradie podla pieces[])
+; Vystup: eax = 1 success / 0 fail, rdx = idx
+; ============================================================
+tb_encode_111_num3_idx:
+    push rbx
+    push r8
+    push r9
+    push r10
+    push r11
+
+    mov r8d, edi                  ; p0
+    mov r9d, esi                  ; p1
+    mov r10d, edx                 ; p2
+
+    ; mirror na a-d file podla p0
+    test r8d, 4
+    jz .m_rank
+    xor r8d, 7
+    xor r9d, 7
+    xor r10d, 7
+
+.m_rank:
+    ; mirror na ranks 1-4 podla p0
+    test r8d, 32
+    jz .diag_norm
+    xor r8d, 56
+    xor r9d, 56
+    xor r10d, 56
+
+.diag_norm:
+    ; najdi prvu nediagonalnu figuru z p0..p2 a pripadne flipni diagonalu
+    lea r11, [tb_offdiag]
+    movsx eax, byte [r11 + r8]
+    test eax, eax
+    jnz .diag_decide
+    movsx eax, byte [r11 + r9]
+    test eax, eax
+    jnz .diag_decide
+    movsx eax, byte [r11 + r10]
+
+.diag_decide:
+    cmp eax, 0
+    jle .idx_branch
+    lea r11, [tb_flipdiag]
+    movzx eax, byte [r11 + r8]
+    mov r8d, eax
+    movzx eax, byte [r11 + r9]
+    mov r9d, eax
+    movzx eax, byte [r11 + r10]
+    mov r10d, eax
+
+.idx_branch:
+    ; i = (p1 > p0), j = (p2 > p0) + (p2 > p1)
+    xor ecx, ecx
+    cmp r9d, r8d
+    setg cl                       ; i
+    xor ebx, ebx
+    cmp r10d, r8d
+    setg bl
+    xor edx, edx
+    cmp r10d, r9d
+    setg dl
+    add ebx, edx                  ; j
+
+    ; if offdiag(p0)
+    lea r11, [tb_offdiag]
+    movsx eax, byte [r11 + r8]
+    test eax, eax
+    jz .chk_p1
+
+    lea r11, [tb_triangle]
+    movzx eax, byte [r11 + r8]
+    imul eax, eax, 3906           ; 63*62
+    mov edx, r9d
+    sub edx, ecx
+    imul edx, edx, 62
+    add eax, edx
+    mov edx, r10d
+    sub edx, ebx
+    add eax, edx
+    mov edx, eax
+    mov eax, 1
+    jmp .done
+
+.chk_p1:
+    lea r11, [tb_offdiag]
+    movsx eax, byte [r11 + r9]
+    test eax, eax
+    jz .chk_p2
+
+    lea r11, [tb_diag]
+    movzx eax, byte [r11 + r8]
+    imul eax, eax, 1736           ; 28*62
+    add eax, 23436                ; 6*63*62
+    lea r11, [tb_lower]
+    movzx edx, byte [r11 + r9]
+    imul edx, edx, 62
+    add eax, edx
+    mov edx, r10d
+    sub edx, ebx
+    add eax, edx
+    mov edx, eax
+    mov eax, 1
+    jmp .done
+
+.chk_p2:
+    lea r11, [tb_offdiag]
+    movsx eax, byte [r11 + r10]
+    test eax, eax
+    jz .all_diag
+
+    lea r11, [tb_diag]
+    movzx eax, byte [r11 + r8]
+    imul eax, eax, 196            ; 7*28
+    add eax, 27888                ; 6*63*62 + 4*28*62
+    movzx edx, byte [r11 + r9]
+    sub edx, ecx
+    imul edx, edx, 28
+    add eax, edx
+    lea r11, [tb_lower]
+    movzx edx, byte [r11 + r10]
+    add eax, edx
+    mov edx, eax
+    mov eax, 1
+    jmp .done
+
+.all_diag:
+    lea r11, [tb_diag]
+    movzx eax, byte [r11 + r8]
+    imul eax, eax, 42             ; 7*6
+    add eax, 28672                ; 6*63*62 + 4*28*62 + 4*7*28
+    movzx edx, byte [r11 + r9]
+    sub edx, ecx
+    imul edx, edx, 6
+    add eax, edx
+    movzx edx, byte [r11 + r10]
+    sub edx, ebx
+    add eax, edx
+    mov edx, eax
+    mov eax, 1
+    jmp .done
+
+.done:
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbx
+    ret
+
+; ============================================================
 ; tb_pairs_decode_symbol_idx - decode raw symbol zo setup_pairs a idx
 ; Vstup: rdi = setup_pairs ptr, rsi = map_end, rdx = tb_size, rcx = idx
 ; Vystup: eax = 1 success / 0 fail, edx = raw symbol
