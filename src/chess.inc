@@ -76,3 +76,4 @@ TB_LOSS      equ 0
 TB_DRAW      equ 1
 TB_WIN       equ 2
 TB_NOT_FOUND equ 255
+DTZ_UNSUPPORTED equ 32768
