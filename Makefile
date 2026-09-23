@@ -31,7 +31,7 @@ COMMANDS_DEBUG_LOG ?= commands_debug.log
 COMMANDS_DEBUG ?= $(shell awk -F= 'tolower($$1) ~ /^[[:space:]]*debug[[:space:]]*$$/ {v=tolower($$2); gsub(/[[:space:]]/,"",v); print (v ~ /^(1|true|yes|on)$$/ ? 1 : 0); found=1; exit} END {if (!found) print 0}' chess.ini 2>/dev/null)
 LOG_RUN = COMMANDS_DEBUG=$(COMMANDS_DEBUG) COMMANDS_DEBUG_LOG=$(COMMANDS_DEBUG_LOG) bash tests/tuning/command_debug_run.sh
 
-.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece
+.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings
 
 all: $(TARGET) $(TARGET_STATIC)
 
@@ -48,6 +48,16 @@ $(TARGET_STATIC): $(OBJS_STATIC)
 $(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc $(SRCDIR)/eval_tune.inc $(SRCDIR)/pst_tune.inc
 	@mkdir -p $(dir $@)
 	nasm $(NASMFLAGS) $(EXTRA_DEFINES) $< -o $@
+
+# tb.asm a bb.asm includuju dalsie zdrojaky - bez tychto deps sa obj
+# po zmene includovanych suborov neprebuildne (stale binary bug).
+$(OBJDIR)/tb.o: $(SRCDIR)/tb/core_io.asm $(SRCDIR)/tb/pairs_decode.asm $(SRCDIR)/tb/probe_api.asm \
+	$(SRCDIR)/tb/pairs/helpers.asm $(SRCDIR)/tb/pairs/index_encode.asm \
+	$(SRCDIR)/tb/pairs/symbol_decode.asm $(SRCDIR)/tb/pairs/wdl_try.asm \
+	$(SRCDIR)/tb/probe/path_helpers.asm $(SRCDIR)/tb/probe/init_load.asm \
+	$(SRCDIR)/tb/probe/wdl_probe.asm $(SRCDIR)/tb/probe/dtz_probe.asm $(SRCDIR)/tb/probe/piece_count.asm
+
+$(OBJDIR)/bb.o: $(SRCDIR)/bitboard_tables.inc
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TARGET_STATIC)
@@ -179,6 +189,16 @@ nightly-pipeline:
 sprt-ab:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make sprt-ab CANDIDATE=./candidate [BASELINE=./chess-static] [EXECUTE=1]"; exit 2; fi
 	$(LOG_RUN) "bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+review-pack:
+	bash utils/review_bundle.sh "$(or $(COMMIT),HEAD)"
+
+review-pack-nogate:
+	RUN_GATE=0 bash utils/review_bundle.sh "$(or $(COMMIT),HEAD)"
+
+review-findings:
+	@if [ ! -f tests/reports/reviewer/latest/findings.md ]; then echo "Findings nenajdene: tests/reports/reviewer/latest/findings.md (najprv: make review-pack)"; exit 1; fi
+	@cat tests/reports/reviewer/latest/findings.md
 
 rtbz-variants:
 	@if [ -n "$(GENERATOR)" ]; then \
