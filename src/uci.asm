@@ -159,10 +159,14 @@ extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit
 extern generate_all_moves, find_move, apply_move, update_position_state, compute_hash
 extern search_best_move, book_lookup, print_move, square_to_str, print_number
 extern tt_init
-extern parse_fen_string, parse_int
+extern parse_fen_string, parse_int, config_get
 extern board, side, move_buf, move_buf_len, move_list, move_count, search_depth
 extern position_hash, square_str_buf
 extern eval_mode
+extern nnue_load
+extern nnue2_load
+extern key_nnue_file
+extern default_nnue_file
 extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
@@ -1002,6 +1006,24 @@ uci_setoption:
     mov eax, 2
 .evalmode_store:
     mov [eval_mode], al
+    cmp al, 0
+    je .done
+    ; Runtime prepnutie eval modu: nacitaj model z rovnakej konfiguracie
+    ; ako pri starte (nnue_file v chess.ini, fallback default_nnue_file).
+    lea rdi, [key_nnue_file]
+    lea rsi, [default_nnue_file]
+    call config_get
+    mov rdi, rax
+    cmp byte [eval_mode], 2
+    je .evalmode_load_v2
+    call nnue_load
+    jmp .evalmode_load_done
+.evalmode_load_v2:
+    call nnue2_load
+.evalmode_load_done:
+    test eax, eax
+    jz .done
+    mov byte [eval_mode], 0
     jmp .done
 
 .done:
