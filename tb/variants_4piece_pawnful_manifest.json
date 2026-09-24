@@ -1,0 +1,674 @@
+[
+  {
+    "canonical": "KvK",
+    "alias": "kK",
+    "total_pieces": 2,
+    "white_pieces": [],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KBvK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KNvK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KPvK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQvK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRvK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KvBK",
+    "alias": "kbK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KvNK",
+    "alias": "knK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvPK",
+    "alias": "kpK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvQK",
+    "alias": "kqK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KvRK",
+    "alias": "krK",
+    "total_pieces": 3,
+    "white_pieces": [],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KBBvK",
+    "alias": "kbbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B",
+      "B"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KBNvK",
+    "alias": "kbnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B",
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KBPvK",
+    "alias": "kbpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B",
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KBvBK",
+    "alias": "kbbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KBvNK",
+    "alias": "kbnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KBvPK",
+    "alias": "kbpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KBvQK",
+    "alias": "kbqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KBvRK",
+    "alias": "kbrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "B"
+    ],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KNNvK",
+    "alias": "knnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N",
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KNPvK",
+    "alias": "knpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N",
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KNvBK",
+    "alias": "knbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KNvNK",
+    "alias": "knnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KNvPK",
+    "alias": "knpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KNvQK",
+    "alias": "knqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KNvRK",
+    "alias": "knrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "N"
+    ],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KPPvK",
+    "alias": "kppK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P",
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KPvBK",
+    "alias": "kpbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KPvNK",
+    "alias": "kpnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KPvPK",
+    "alias": "kppK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KPvQK",
+    "alias": "kpqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KPvRK",
+    "alias": "kprK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "P"
+    ],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KQBvK",
+    "alias": "kqbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q",
+      "B"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQNvK",
+    "alias": "kqnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q",
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQPvK",
+    "alias": "kqpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q",
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQQvK",
+    "alias": "kqqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q",
+      "Q"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQRvK",
+    "alias": "kqrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q",
+      "R"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KQvBK",
+    "alias": "kqbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KQvNK",
+    "alias": "kqnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KQvPK",
+    "alias": "kqpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KQvQK",
+    "alias": "kqqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KQvRK",
+    "alias": "kqrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "Q"
+    ],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KRBvK",
+    "alias": "krbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R",
+      "B"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRNvK",
+    "alias": "krnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R",
+      "N"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRPvK",
+    "alias": "krpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R",
+      "P"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRRvK",
+    "alias": "krrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R",
+      "R"
+    ],
+    "black_pieces": []
+  },
+  {
+    "canonical": "KRvBK",
+    "alias": "krbK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": [
+      "B"
+    ]
+  },
+  {
+    "canonical": "KRvNK",
+    "alias": "krnK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": [
+      "N"
+    ]
+  },
+  {
+    "canonical": "KRvPK",
+    "alias": "krpK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": [
+      "P"
+    ]
+  },
+  {
+    "canonical": "KRvQK",
+    "alias": "krqK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": [
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KRvRK",
+    "alias": "krrK",
+    "total_pieces": 4,
+    "white_pieces": [
+      "R"
+    ],
+    "black_pieces": [
+      "R"
+    ]
+  },
+  {
+    "canonical": "KvBBK",
+    "alias": "kbbK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "B",
+      "B"
+    ]
+  },
+  {
+    "canonical": "KvBNK",
+    "alias": "kbnK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "B",
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvBPK",
+    "alias": "kbpK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "B",
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvNNK",
+    "alias": "knnK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "N",
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvNPK",
+    "alias": "knpK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "N",
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvPPK",
+    "alias": "kppK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "P",
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvQBK",
+    "alias": "kqbK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q",
+      "B"
+    ]
+  },
+  {
+    "canonical": "KvQNK",
+    "alias": "kqnK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q",
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvQPK",
+    "alias": "kqpK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q",
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvQQK",
+    "alias": "kqqK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q",
+      "Q"
+    ]
+  },
+  {
+    "canonical": "KvQRK",
+    "alias": "kqrK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "Q",
+      "R"
+    ]
+  },
+  {
+    "canonical": "KvRBK",
+    "alias": "krbK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "R",
+      "B"
+    ]
+  },
+  {
+    "canonical": "KvRNK",
+    "alias": "krnK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "R",
+      "N"
+    ]
+  },
+  {
+    "canonical": "KvRPK",
+    "alias": "krpK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "R",
+      "P"
+    ]
+  },
+  {
+    "canonical": "KvRRK",
+    "alias": "krrK",
+    "total_pieces": 4,
+    "white_pieces": [],
+    "black_pieces": [
+      "R",
+      "R"
+    ]
+  }
+]
