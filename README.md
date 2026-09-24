@@ -26,12 +26,7 @@ Grafický SDL mód:
 - **E6** 🚧 Syzygy/Nalimov čiastočne: `SyzygyPath`/`SyzygyProbeDepth`, mmap loader pre `.rtbw/.rtbz`, `tbtest`, full decode pre 3-piece + 4-piece pawnless (`KRvKB`, `KRvKN`, `KBBvK`, `KBNvK`) s guardrails a oracle cross-check
 - **E7** ✅ Grafika: framebuffer/SDL, BMP figúrky, klikacie rozhranie
 - **E8** ✅ Textový UI panel: história ťahov, zajaté figúrky, knižné ťahy, UCI
-- **E9** 🚧 Vylepšenia sily: bitboard slider bitscan hotový, NNUE decision gate pripravený (`EvalMode`), otvorené body sú už len v aktívnom TODO backlogu
-
-## Aktívny Backlog
-
-- Jediný aktívny TODO backlog je v [docs/superpowers/plans/TODO_OPEN.md](docs/superpowers/plans/TODO_OPEN.md).
-- Staré plánovacie dokumenty sú archivované a neobsahujú otvorené task-listy.
+- **E9** 🚧 Vylepšenia sily: bitboard slider bitscan hotový, NNUE decision gate pripravený (`EvalMode`)
 
 ## Kompilácia
 
