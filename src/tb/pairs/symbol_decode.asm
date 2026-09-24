@@ -288,6 +288,10 @@ tb_pairs_decode_symbol_idx:
     jae .fail
 
     mov r11d, dword [rdx]          ; block
+    mov [tb_dec_trace_block], r11d
+    cmp r11d, [tb_dec_num_blocks]
+    mov byte [tb_dec_stage_tmp], 46
+    jae .fail
     movzx eax, word [rdx + 4]
     add r9d, eax
 

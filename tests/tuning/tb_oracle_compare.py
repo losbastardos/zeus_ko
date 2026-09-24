@@ -32,6 +32,14 @@ CASES = [
     Case("knvk_draw", "8/8/8/8/8/8/4K3/k6N w - - 0 1"),
     Case("kpvk_push", "8/8/8/8/8/8/P3K3/k7 w - - 0 1"),
     Case("kvpk_hold", "8/8/8/8/8/8/p3k3/K7 b - - 0 1"),
+    Case("krvkb_white", "8/8/8/8/8/8/4K2R/k5b1 w - - 0 1"),
+    Case("krvkb_black", "8/8/8/8/8/8/4k2r/K5B1 b - - 0 1"),
+    Case("krvkn_white", "8/8/8/8/8/8/4K2R/k5n1 w - - 0 1"),
+    Case("krvkn_black", "8/8/8/8/8/8/4k2r/K5N1 b - - 0 1"),
+    Case("kbbvk_white", "8/8/8/8/8/8/4K1BB/k7 w - - 0 1"),
+    Case("kbbvk_black", "8/8/8/8/8/8/4k1bb/K7 b - - 0 1"),
+    Case("kbnvk_white", "8/8/8/8/8/8/4K1BN/k7 w - - 0 1"),
+    Case("kbnvk_black", "8/8/8/8/8/8/4k1bn/K7 b - - 0 1"),
 ]
 
 

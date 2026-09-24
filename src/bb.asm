@@ -161,46 +161,87 @@ bb_is_square_attacked:
     lea rcx, [bb_occ]
     mov r10, [rcx]
 
-    ; walker: rsi = dir index, r14 = &delta_dirs (test bit uz netreba)
-    lea r14, [delta_dirs]
-    xor esi, esi
-.dir_loop:
-    cmp esi, 8
-    jae .not_attacked
-    movsx eax, byte [r14 + rsi*2]        ; df
-    movsx edx, byte [r14 + rsi*2 + 1]    ; dr
-    mov ecx, r12d
-    and ecx, 7                   ; file
-    mov edi, r12d
-    shr edi, 3                   ; rank
-.step:
-    add ecx, eax
-    add edi, edx
-    cmp ecx, 0
-    jl .next_dir
-    cmp ecx, 7
-    jg .next_dir
-    cmp edi, 0
-    jl .next_dir
-    cmp edi, 7
-    jg .next_dir
-    ; square = rank*8 + file -> rbx
-    mov ebx, edi
-    shl ebx, 3
-    add ebx, ecx
-    bt r10, rbx                  ; occupied?
-    jnc .step
-    cmp esi, 4
-    jb .diag_hit
-    bt r9, rbx                   ; rooklike?
+    ; --- ortogonalne smery cez ray+btscan ---
+    ; N (rastuce indexy): najblizsi blocker = bsf
+    lea rcx, [bb_ray_n]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .rook_e
+    bsf rcx, rax
+    bt r9, rcx
     jc .attacked
-    jmp .next_dir
-.diag_hit:
-    bt r8, rbx                   ; bishlike?
+
+.rook_e:
+    ; E (rastuce indexy): najblizsi blocker = bsf
+    lea rcx, [bb_ray_e]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .rook_s
+    bsf rcx, rax
+    bt r9, rcx
     jc .attacked
-.next_dir:
-    inc esi
-    jmp .dir_loop
+
+.rook_s:
+    ; S (klesajuce indexy): najblizsi blocker = bsr
+    lea rcx, [bb_ray_s]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .rook_w
+    bsr rcx, rax
+    bt r9, rcx
+    jc .attacked
+
+.rook_w:
+    ; W (klesajuce indexy): najblizsi blocker = bsr
+    lea rcx, [bb_ray_w]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .diag_ne
+    bsr rcx, rax
+    bt r9, rcx
+    jc .attacked
+
+    ; --- diagonalne smery cez ray+btscan ---
+    ; NE (rastuce indexy): najblizsi blocker = bsf
+.diag_ne:
+    lea rcx, [bb_ray_ne]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .diag_nw
+    bsf rcx, rax
+    bt r8, rcx
+    jc .attacked
+
+.diag_nw:
+    ; NW (rastuce indexy): najblizsi blocker = bsf
+    lea rcx, [bb_ray_nw]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .diag_se
+    bsf rcx, rax
+    bt r8, rcx
+    jc .attacked
+
+.diag_se:
+    ; SE (klesajuce indexy): najblizsi blocker = bsr
+    lea rcx, [bb_ray_se]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .diag_sw
+    bsr rcx, rax
+    bt r8, rcx
+    jc .attacked
+
+.diag_sw:
+    ; SW (klesajuce indexy): najblizsi blocker = bsr
+    lea rcx, [bb_ray_sw]
+    mov rax, [rcx + r12*8]
+    and rax, r10
+    jz .not_attacked
+    bsr rcx, rax
+    bt r8, rcx
+    jc .attacked
+    jmp .not_attacked
 
 .attacked:
     mov rax, 1
@@ -334,14 +375,3 @@ dbg_bb_side: db " side=", 0
 dbg_bb_mail: db " mailbox=", 0
 dbg_bb_bb:   db " bb=", 0
 
-section .rodata
-; 8 smerov: (df, dr) — 0-3 diagonalne, 4-7 ortogonalne
-delta_dirs:
-    db  1,  1
-    db  1, -1
-    db -1,  1
-    db -1, -1
-    db  1,  0
-    db -1,  0
-    db  0,  1
-    db  0, -1

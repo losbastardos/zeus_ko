@@ -22,6 +22,8 @@ class Case:
     expect_pieces: int
     expect_wdl_found: bool
     expect_dtz_found: bool
+    expect_wdl_value: int | None = None
+    expect_dtz_value: int | None = None
 
 
 CASES = [
@@ -59,6 +61,42 @@ CASES = [
         expect_pieces=3,
         expect_wdl_found=True,
         expect_dtz_found=True,
+    ),
+    Case(
+        name="krvkb_white",
+        position_cmd="position fen 8/8/8/8/8/8/4K2R/k5b1 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
+    ),
+    Case(
+        name="krvkn_white",
+        position_cmd="position fen 8/8/8/8/8/8/4K2R/k5n1 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
+    ),
+    Case(
+        name="kbbvk_white",
+        position_cmd="position fen 8/8/8/8/8/8/4K1BB/k7 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
+    ),
+    Case(
+        name="kbnvk_white",
+        position_cmd="position fen 8/8/8/8/8/8/4K1BN/k7 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
     ),
 ]
 
@@ -118,6 +156,12 @@ def check_case(case: Case, values: Dict[str, str]) -> tuple[bool, str]:
     if pieces != case.expect_pieces:
         return False, f"pieces mismatch: got {pieces}, expected {case.expect_pieces}"
 
+    if case.expect_wdl_value is not None and wdl != case.expect_wdl_value:
+        return False, f"wdl mismatch: got {wdl}, expected {case.expect_wdl_value}"
+
+    if case.expect_dtz_value is not None and dtz != case.expect_dtz_value:
+        return False, f"dtz mismatch: got {dtz}, expected {case.expect_dtz_value}"
+
     if case.expect_wdl_found:
         if wdl == 255:
             return False, "wdl expected found but got TB_NOT_FOUND"
@@ -128,9 +172,9 @@ def check_case(case: Case, values: Dict[str, str]) -> tuple[bool, str]:
     if case.expect_dtz_found:
         if dtz == 255:
             return False, "dtz expected found but got TB_NOT_FOUND"
-        if map_bytes <= 0:
+        if case.expect_dtz_value is None and map_bytes <= 0:
             return False, f"dtz expected mapped file but map_bytes={map_bytes}"
-        if not path.endswith(".rtbz"):
+        if case.expect_dtz_value is None and not path.endswith(".rtbz"):
             return False, f"dtz expected .rtbz path but got '{path}'"
     else:
         if dtz != 255:

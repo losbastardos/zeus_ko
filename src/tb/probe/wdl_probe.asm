@@ -23,10 +23,11 @@ tb_probe_wdl:
     mov byte [tb_wdl_debug_order_byte], 0
     mov byte [tb_file_path], 0
 
-    ; Tento krok je zamerany na male (2-3 figurkove) koncovky.
+    ; Tento krok je zamerany na male (2-4 figurkove) koncovky.
     ; Pri nepoznanych typoch vratime TB_NOT_FOUND.
     call tb_piece_count
-    cmp eax, 3
+    mov [tb_num], eax
+    cmp eax, 4
     jg .not_found
 
     ; Krok 1: legal no-moves guard pred akymkolvek decode.
@@ -44,34 +45,10 @@ tb_probe_wdl:
     jmp .draw
 
 .scan_setup:
-
-    lea rbx, [board]
-    xor r13d, r13d          ; white non-king piece type
-    xor r14d, r14d          ; black non-king piece type
-    xor ecx, ecx
-.scan:
-    cmp ecx, 64
-    jae .scan_done
-    movzx eax, byte [rbx + rcx]
-    test eax, eax
-    jz .next
-    mov edx, eax
-    and edx, PIECE_MASK
-    cmp edx, KING
-    je .next
-    test eax, COLOR_MASK
-    jz .white_piece
-    test r14d, r14d
-    jnz .not_found
-    mov r14d, edx
-    jmp .next
-.white_piece:
-    test r13d, r13d
-    jnz .not_found
-    mov r13d, edx
-.next:
-    inc ecx
-    jmp .scan
+    call tb_material_scan
+    mov [tb_nonking], eax
+    movzx r13d, byte [tb_board_pieces]
+    movzx r14d, byte [tb_board_pieces + 8]
 
 .scan_done:
     ; skus otvorit/mapovat relevantny WDL subor (ak je nastavena cesta)
@@ -82,6 +59,13 @@ tb_probe_wdl:
     call tb_ensure_loaded_path
     test eax, eax
     jnz .not_found
+
+    ; priprav pieces/norm/factor metadata z hlavicky pre dalsi full decode krok
+    mov rdi, [tb_map]
+    mov rsi, [tb_map_size]
+    call tb_setup_pieces_piece
+    ; priprava metadata je pre nasledujuce full decode kroky,
+    ; aktualny 3-piece tok nesmie padnut ak parser vrati fail
 
     ; Syzygy regular WDL magic guard + payload probe byte
     mov rdi, [tb_map]
@@ -136,6 +120,9 @@ tb_probe_wdl:
     jmp .draw
 
 .classify:
+    cmp dword [tb_nonking], 1
+    ja .not_found
+
     ; KvK -> draw
     test r13d, r13d
     jnz .white_has_piece

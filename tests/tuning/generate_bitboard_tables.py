@@ -34,6 +34,20 @@ def bb_for_targets(start: int, deltas: List[tuple[int, int]]) -> int:
     return bb
 
 
+def bb_ray(start: int, delta: tuple[int, int]) -> int:
+    f = start % 8
+    r = start // 8
+    df, dr = delta
+    bb = 0
+    nf = f + df
+    nr = r + dr
+    while on_board(nf, nr):
+        bb |= 1 << sq(nf, nr)
+        nf += df
+        nr += dr
+    return bb
+
+
 def emit_table(name: str, values: List[int]) -> str:
     lines = [f"{name}:"]
     for v in values:
@@ -55,6 +69,16 @@ def main() -> int:
         (0, -1),           (0, 1),
         (1, -1),  (1, 0),  (1, 1),
     ]
+    rays = {
+        "bb_ray_n": (0, 1),
+        "bb_ray_s": (0, -1),
+        "bb_ray_e": (1, 0),
+        "bb_ray_w": (-1, 0),
+        "bb_ray_ne": (1, 1),
+        "bb_ray_nw": (-1, 1),
+        "bb_ray_se": (1, -1),
+        "bb_ray_sw": (-1, -1),
+    }
 
     knight = [bb_for_targets(i, knight_deltas) for i in range(64)]
     king = [bb_for_targets(i, king_deltas) for i in range(64)]
@@ -68,6 +92,10 @@ def main() -> int:
     text.append("")
     text.append(emit_table("bb_king_attacks", king))
     text.append("")
+    for name, delta in rays.items():
+        values = [bb_ray(i, delta) for i in range(64)]
+        text.append(emit_table(name, values))
+        text.append("")
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
