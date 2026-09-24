@@ -31,7 +31,7 @@ DEFAULT REL
 %define ENABLE_FUTILITY 1
 %endif
 %ifndef ENABLE_LMR
-%define ENABLE_LMR 1
+%define ENABLE_LMR 0
 %endif
 %ifndef ENABLE_SINGULAR
 %define ENABLE_SINGULAR 1
