@@ -115,11 +115,12 @@ check_time:
 
 .poll_input:
     ; neblokujuce spracovanie stdin (stop/ponderhit/isready/quit)
-    ; len kazdych 1024 nodov; aj v mode 3/4, inak by stop nikdy neprisiel
+    ; kazdych 128 nodov: pri pomalsich eval moduloch (napr. NNUE2)
+    ; by 1024-node polling reagoval na stop/movetime prilis neskoro.
     cmp byte [book_rating_flag], 0
     jne .check_mode              ; book rating: nech nezožiera stdin (text mode)
     mov rax, [nodes_searched]
-    and rax, 1023
+    and rax, 127
     jnz .check_mode
     call search_poll_input
     cmp byte [uci_stop_flag], 0
@@ -139,7 +140,7 @@ check_time:
     jz .no_stop
 
     mov rax, [nodes_searched]
-    and rax, 1023
+    and rax, 127
     jnz .no_stop
 
     mov rax, SYS_CLOCK_GETTIME
