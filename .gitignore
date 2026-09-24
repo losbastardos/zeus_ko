@@ -4,6 +4,7 @@ obj/
 chess
 chess-sdl
 chess-static
+chess-static-*
 
 # historické verzie súborov (.history plugin)
 .history/
@@ -19,6 +20,11 @@ commands_debug.log
 # (nie nástroje clone / build artefakty)
 tb/syzygy-tb/
 tb/rtblog.txt
+tb/KRvK*.rtb[wwz]
+tb/KBBvK.rtb[wwz]
+tb/KBNvK.rtb[wwz]
+tb/BBvK.rtb[wwz]
+tb/BNvK.rtb[wwz]
 
 # výstupy test/tuning pipeline (make *_REPORT=...)
 tests/reports/
@@ -32,6 +38,7 @@ docs/
 AGENTS.md
 .vscode/
 SESSION_LOG.md
+scratch/
 
 # utils: trackujeme len workflow skripty referencované z Makefile;
 # ostatné (deploy s lokálnymi cestami, PGN databázy, book generátory) ostávajú súkromné
