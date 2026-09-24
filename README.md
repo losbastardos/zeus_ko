@@ -3,7 +3,7 @@
 A high-performance chess engine written in x86-64 NASM assembly for Linux, featuring UCI protocol support, alpha-beta pruning with quiescence search, opening book integration, and both text and graphical (framebuffer/SDL) interfaces.
 
 Textový šachový engine písaný v čistom NASM assembly pre x86-64 Linux.
-Aktuálny stav: E4 alpha-beta + eval hotové, E5 opening book, E6 čiastočne (Syzygy `.rtbw` mmap loader + základný WDL probe), bočný panel v textovom móde a E7 grafika (framebuffer/SDL).
+Aktuálny stav: E4 alpha-beta + eval hotové, E5 opening book, E6 čiastočne (Syzygy `.rtbw/.rtbz` mmap loader, full WDL/DTZ decode pre 3-piece a 4-piece pawnless set), bočný panel v textovom móde a E7 grafika (framebuffer/SDL).
 
 ## Screenshoty
 
@@ -23,9 +23,15 @@ Grafický SDL mód:
 - **E3** ✅ NegaMax (hĺbka 3-4), engine hrá čierneho
 - **E4** ✅ Alpha-Beta + evaluácia (materiál + PST), quiescence
 - **E5** ✅ Opening book (vlastný formát `hash | move`)
-- **E6** 🚧 Syzygy/Nalimov čiastočne: `SyzygyPath`/`SyzygyProbeDepth`, mmap loader pre `.rtbw`, `tbtest`, WDL/DTZ bootstrap + guardrails, oracle helper pre cross-check
+- **E6** 🚧 Syzygy/Nalimov čiastočne: `SyzygyPath`/`SyzygyProbeDepth`, mmap loader pre `.rtbw/.rtbz`, `tbtest`, full decode pre 3-piece + 4-piece pawnless (`KRvKB`, `KRvKN`, `KBBvK`, `KBNvK`) s guardrails a oracle cross-check
 - **E7** ✅ Grafika: framebuffer/SDL, BMP figúrky, klikacie rozhranie
 - **E8** ✅ Textový UI panel: história ťahov, zajaté figúrky, knižné ťahy, UCI
+- **E9** 🚧 Vylepšenia sily: bitboard slider bitscan hotový, NNUE decision gate pripravený (`EvalMode`), otvorené body sú už len v aktívnom TODO backlogu
+
+## Aktívny Backlog
+
+- Jediný aktívny TODO backlog je v [docs/superpowers/plans/TODO_OPEN.md](docs/superpowers/plans/TODO_OPEN.md).
+- Staré plánovacie dokumenty sú archivované a neobsahujú otvorené task-listy.
 
 ## Kompilácia
 

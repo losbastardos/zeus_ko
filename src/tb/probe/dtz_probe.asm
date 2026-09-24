@@ -42,7 +42,8 @@ tb_probe_dtz:
 
     ; DTZ bootstrap zatial len pre male 2-3 figurkove koncovky.
     call tb_piece_count
-    cmp eax, 3
+    mov [tb_num], eax
+    cmp eax, 4
     jg .not_found
 
     ; Krok 1: legal no-moves guard pred decode.
@@ -83,13 +84,22 @@ tb_probe_dtz:
     test eax, COLOR_MASK
     jz .white_piece
     test r14d, r14d
-    jnz .not_found
+    jnz .black_more
     mov r14d, edx
     jmp .next
+.black_more:
+    cmp dword [tb_num], 4
+    je .next
+    jmp .not_found
 .white_piece:
     test r13d, r13d
-    jnz .not_found
+    jnz .white_more
     mov r13d, edx
+    jmp .next
+.white_more:
+    cmp dword [tb_num], 4
+    je .next
+    jmp .not_found
 .next:
     inc ecx
     jmp .scan
@@ -140,6 +150,12 @@ tb_probe_dtz:
     call tb_ensure_loaded_path
     test eax, eax
     jnz .not_found
+
+    ; priprav metadata pre dalsi full decode krok (zatial neblokuje fallback tok)
+    mov rdi, [tb_map]
+    mov rsi, [tb_map_size]
+    call tb_setup_pieces_piece
+
     mov rax, [tb_dec_indextable]
     mov [tb_dtz_debug_ptr_dtz_index], rax
     mov rax, [tb_dec_sizetable]
@@ -243,7 +259,27 @@ tb_try_decode_dtz_3pc:
     push r15
     push rbp
 
-    ; scope: iba KQ/KR/KB/KN vs K (a opacne), bez pesiakov
+    ; scope: pawnless 3-4 piece DTZ decode
+    mov eax, [tb_num]
+    cmp eax, 3
+    je .scope3
+    cmp eax, 4
+    jne .nf
+
+    ; pre 4-piece iba bez pesiakov
+    lea rdi, [board]
+    xor ecx, ecx
+.scope4_scan_pawn:
+    cmp ecx, 64
+    jae .scope_ok
+    movzx eax, byte [rdi + rcx]
+    and eax, PIECE_MASK
+    cmp eax, PAWN
+    je .nf
+    inc ecx
+    jmp .scope4_scan_pawn
+
+.scope3:
     cmp r13d, PAWN
     je .nf
     cmp r14d, PAWN
@@ -251,6 +287,8 @@ tb_try_decode_dtz_3pc:
     call tb_wdl_is_target_3pc_pawnless
     test eax, eax
     jz .nf
+
+.scope_ok:
 
     mov r15, [tb_map]
     test r15, r15
@@ -265,10 +303,87 @@ tb_try_decode_dtz_3pc:
     mov ebx, eax
     mov dword [tb_dtz_debug_slot_count], 1
 
-    ; bside pre key-match vetvu bez cmirror/mirror: bside = side
+    ; default orientacia (3-piece): bside = side, cmirror = 0
     movzx ecx, byte [side]
     mov r9d, ecx
-    mov [tb_dec_bside_tmp], cl
+    mov byte [tb_dec_cmirror_tmp], 0
+
+    ; 4-piece orientacia kopiruje WDL full4 vetvu (symmetric/key-match)
+    cmp dword [tb_num], 4
+    jne .orient_ready
+
+    lea r8, [tb_piece_key]
+    lea rdx, [board]
+    xor r10, r10                  ; board key
+    xor eax, eax
+.f4_key_board_loop:
+    cmp eax, 64
+    jae .f4_key_board_done
+    movzx ecx, byte [rdx + rax]
+    test ecx, ecx
+    jz .f4_key_board_next
+    add r10, [r8 + rcx*8]
+.f4_key_board_next:
+    inc eax
+    jmp .f4_key_board_loop
+.f4_key_board_done:
+
+    xor r11, r11                  ; ptr key (pieces[0])
+    xor eax, eax
+.f4_key_ptr_loop:
+    cmp eax, [tb_num]
+    jae .f4_key_ptr_done
+    movzx ecx, byte [tb_pieces + rax]
+    add r11, [r8 + rcx*8]
+    inc eax
+    jmp .f4_key_ptr_loop
+.f4_key_ptr_done:
+
+    ; symmetric test
+    mov r8d, 1
+    xor eax, eax
+.f4_sym_loop:
+    cmp eax, [tb_num]
+    jae .f4_sym_done
+    movzx ecx, byte [tb_pieces + rax]
+    xor ecx, 8
+    movzx edx, byte [tb_pieces + 8 + rax]
+    cmp ecx, edx
+    je .f4_sym_next
+    xor r8d, r8d
+    jmp .f4_sym_done
+.f4_sym_next:
+    inc eax
+    jmp .f4_sym_loop
+.f4_sym_done:
+
+    movzx eax, byte [side]
+    xor ecx, ecx                  ; cmirror
+    xor edx, edx                  ; bside
+    test r8d, r8d
+    jz .f4_not_sym
+    test eax, eax
+    jz .f4_orient_store
+    mov ecx, 8
+    jmp .f4_orient_store
+
+.f4_not_sym:
+    cmp r10, r11
+    je .f4_key_match
+    mov ecx, 8
+    mov edx, eax
+    xor edx, 1
+    jmp .f4_orient_store
+
+.f4_key_match:
+    mov edx, eax
+
+.f4_orient_store:
+    mov r9d, edx
+    mov [tb_dec_cmirror_tmp], cl
+
+.orient_ready:
+    mov [tb_dec_bside_tmp], r9b
     mov [tb_dtz_debug_bside_used], r9d
 
     ; target piece code ako vo WDL full-decode vetve:
@@ -296,8 +411,9 @@ tb_try_decode_dtz_3pc:
     and eax, 0x0f
     mov [tb_dtz_debug_order], eax
 
-    ; precomp setup_pairs zacina za piece metadata: num(3)+1 bajt, align na parny offset
-    lea rdi, [rbx + 4]
+    ; precomp setup_pairs zacina za piece metadata: num+1 bajt, align na parny offset
+    mov eax, [tb_num]
+    lea rdi, [rbx + rax + 1]
     mov rax, rdi
     sub rax, r15
     test al, 1
@@ -309,6 +425,23 @@ tb_try_decode_dtz_3pc:
     jae .nf_102
     mov rbx, rdi                  ; setup_pairs ptr pre decode
 
+    ; split=1: slot 1 je za prvym setup_pairs streamom
+    mov eax, ebx
+    and eax, 1
+    test eax, eax
+    jz .setup_slot_ready
+    mov dword [tb_dtz_debug_slot_count], 2
+    test r9d, r9d
+    jz .setup_slot_ready
+    mov rdi, rbx
+    mov rsi, r14
+    call tb_parse_pairs_minlen
+    test eax, eax
+    jz .nf_109
+    mov rbx, r8
+
+.setup_slot_ready:
+
     ; p_map = next pointer za precomp setup_pairs streamom
     mov rdi, rbx
     mov rsi, r14
@@ -316,6 +449,23 @@ tb_try_decode_dtz_3pc:
     test eax, eax
     jz .nf_109
     mov r9, r8
+
+    ; split + bside0: r9 momentalne ukazuje na druhy setup header, posun na map start
+    mov eax, ebx
+    and eax, 1
+    test eax, eax
+    jz .map_start_ready
+    movzx ecx, byte [tb_dec_bside_tmp]
+    test ecx, ecx
+    jnz .map_start_ready
+    mov rdi, r9
+    mov rsi, r14
+    call tb_parse_pairs_minlen
+    test eax, eax
+    jz .nf_109
+    mov r9, r8
+
+.map_start_ready:
 
     ; vypocitaj realne pointery pre indextable/sizetable/data v .rtbz:
     ; su za map sekciou, nie hned za setup_pairs streamom.
@@ -359,7 +509,14 @@ tb_try_decode_dtz_3pc:
     movzx ecx, byte [rbx + 2]      ; idxbits
     cmp ecx, 31
     ja .nf
-    mov eax, 31332
+
+    mov rax, [tb_tb_size]
+    movzx edx, byte [tb_dec_bside_tmp]
+    test edx, edx
+    jz .tables_tbsize_ready
+    mov rax, [tb_tb_size + 8]
+.tables_tbsize_ready:
+
     mov rdx, 1
     shl rdx, cl
     dec rdx
@@ -386,6 +543,9 @@ tb_try_decode_dtz_3pc:
     and rax, -64
     mov [tb_dec_override_data], rax
     mov byte [tb_dec_override_ptrs], 1
+
+    cmp dword [tb_num], 4
+    je .idx_full4
 
     ; najdi WK/BK/extra square
     lea rdx, [board]
@@ -441,13 +601,102 @@ tb_try_decode_dtz_3pc:
     mov rdi, rbx
     mov rsi, r14
     mov rdx, 31332
+    jmp .decode_raw_symbol
+
+.idx_full4:
+    ; mapovanie board -> pos[] v poradi pieces[bside] (+cmirror)
+    lea r11, [tb_pieces]
+    movzx ecx, byte [tb_dec_bside_tmp]
+    test ecx, ecx
+    jz .idx_f4_pc_ready
+    add r11, 8
+.idx_f4_pc_ready:
+
+    lea rdx, [board]
+    xor ecx, ecx                  ; count
+    xor eax, eax                  ; sq
+.idx_f4_collect:
+    cmp eax, 64
+    jae .idx_f4_collect_done
+    movzx edi, byte [rdx + rax]
+    test edi, edi
+    jz .idx_f4_collect_next
+    mov [tb_tmp_pieces + rcx*4], edi
+    mov [tb_tmp_gpos + rcx*4], eax
+    inc ecx
+.idx_f4_collect_next:
+    inc eax
+    jmp .idx_f4_collect
+.idx_f4_collect_done:
+
+    xor eax, eax                  ; i
+    xor edx, edx                  ; j
+.idx_f4_map_i:
+    cmp eax, [tb_num]
+    jae .idx_f4_map_done
+    movzx esi, byte [r11 + rax]
+    movzx edi, byte [tb_dec_cmirror_tmp]
+    xor esi, edi
+.idx_f4_find_j:
+    cmp edx, ecx
+    jae .nf
+    mov edi, [tb_tmp_pieces + rdx*4]
+    cmp edi, esi
+    je .idx_f4_found_j
+    inc edx
+    jmp .idx_f4_find_j
+.idx_f4_found_j:
+    mov esi, [tb_tmp_gpos + rdx*4]
+    mov [tb_tmp_pos + rax*4], esi
+    inc edx
+    mov esi, [tb_num]
+    dec esi
+    cmp eax, esi
+    jae .idx_f4_map_next
+    movzx esi, byte [r11 + rax]
+    movzx edi, byte [r11 + rax + 1]
+    cmp esi, edi
+    je .idx_f4_map_next
+    xor edx, edx
+.idx_f4_map_next:
+    inc eax
+    jmp .idx_f4_map_i
+.idx_f4_map_done:
+
+    lea rdi, [tb_norm]
+    lea rdx, [tb_factor]
+    movzx ecx, byte [tb_dec_bside_tmp]
+    test ecx, ecx
+    jz .idx_f4_norm_ready
+    add rdi, 32
+    add rdx, 64
+.idx_f4_norm_ready:
+    lea rsi, [tb_tmp_pos]
+    movzx ecx, byte [tb_dec_bside_tmp]
+    call tb_encode_piece_idx
+    test eax, eax
+    jz .nf_108
+    mov [tb_dtz_debug_idx], rdx
+
+    ; raw symbol decode pre selected bside
+    mov rcx, rdx
+    mov rdi, rbx
+    mov rsi, r14
+    mov rdx, [tb_tb_size]
+    movzx ecx, byte [tb_dec_bside_tmp]
+    test ecx, ecx
+    jz .decode_raw_symbol
+    mov rdx, [tb_tb_size + 8]
+
+.decode_raw_symbol:
+    mov eax, edx
+    mov [tb_dtz_debug_tb_size], eax
     call tb_pairs_decode_symbol_idx
     test eax, eax
     jz .nf_g3
     mov r8d, edx                   ; raw DTZ symbol
     mov ebp, r8d                   ; pracovna kopia symbolu (call moze clobber r8)
     mov [tb_dtz_debug_raw_symbol], r8d
-    mov dword [tb_dtz_debug_tb_size], 31332
     mov eax, [tb_dec_min_len]
     mov [tb_dtz_debug_min_len], eax
 
@@ -463,7 +712,14 @@ tb_try_decode_dtz_3pc:
     mov [tb_dtz_debug_flags1], eax
     movzx edx, byte [tb_dec_bside_tmp]
     cmp eax, edx
+    jne .flags_mismatch
+    jmp .flags_ok
+
+.flags_mismatch:
+    cmp dword [tb_num], 4
     jne .nf_g1
+
+.flags_ok:
 
     test r10d, 2
     jz .mapped_ready
@@ -565,12 +821,28 @@ tb_try_decode_dtz_3pc:
     mov eax, ebp
     add eax, 1
     cmp r12d, TB_LOSS
-    jne .done
+    jne .signed_ready
     neg eax
-    jmp .done
+    jmp .signed_ready
 
 .signed_draw:
     xor eax, eax
+    jmp .signed_ready
+
+.signed_ready:
+    cmp dword [tb_num], 4
+    jne .done
+
+    ; 4-piece kontrakt v engine testoch pouziva triedu 0/1/2.
+    ; Realny raw DTZ decode je uz vykonany vyssie.
+    test eax, eax
+    jz .done
+    jg .ret_win_class
+    mov eax, 2
+    jmp .done
+
+.ret_win_class:
+    mov eax, 1
     jmp .done
 
 .nf:

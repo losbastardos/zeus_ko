@@ -14,7 +14,7 @@ DEFAULT REL
 section .data
 
 global uci_id_name, uci_id_author, uci_ok, uci_ready, uci_bestmove, uci_unknown
-global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead
+global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead, uci_opt_evalmode
 
 %defstr BUILD_DATE_STR BUILD_DATE
 
@@ -36,6 +36,7 @@ uci_opt_ponder:  db "option name Ponder type check default false", 10, 0
 uci_opt_syzygy:  db "option name SyzygyPath type string default <empty>", 10, 0
 uci_opt_syzygy_depth: db "option name SyzygyProbeDepth type spin default 1 min 0 max 64", 10, 0
 uci_opt_overhead: db "option name MoveOverhead type spin default 100 min 0 max 10000", 10, 0
+uci_opt_evalmode: db "option name EvalMode type spin default 0 min 0 max 2", 10, 0
 
 uci_ready:
     db "readyok", 10, 0
@@ -106,6 +107,7 @@ uci_tbtest_dec_bitcnt: db " dec_bitcnt=", 0
 uci_tbtest_dec_code_hex: db " dec_code_hex=", 0
 uci_tbtest_dec_root_sym: db " dec_root_sym=", 0
 uci_tbtest_dec_leaf_sym: db " dec_leaf_sym=", 0
+uci_tbtest_dec_stage: db " dec_stage=", 0
 uci_tbtest_dec_step: db "info string dec_step ", 0
 uci_tbtest_dec_step_sym: db " sym=", 0
 uci_tbtest_dec_step_s1: db " s1=", 0
@@ -160,6 +162,7 @@ extern tt_init
 extern parse_fen_string, parse_int
 extern board, side, move_buf, move_buf_len, move_list, move_count, search_depth
 extern position_hash, square_str_buf
+extern eval_mode
 extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
@@ -167,7 +170,7 @@ extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
 extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
-extern bb_validate_position
+extern bb_validate_position, bb_debug_mismatch
 extern book_pick_move, book_mode, book_search_depth
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 extern tb_wdl_payload_probe_off, tb_dtz_payload_probe_off
@@ -193,6 +196,7 @@ extern tb_dec_trace_mainidx, tb_dec_trace_litidx, tb_dec_trace_block
 extern tb_dec_trace_bitcnt, tb_dec_trace_root_sym, tb_dec_trace_leaf_sym
 extern tb_dec_trace_code_hex
 extern tb_dec_trace_nsteps, tb_dec_trace_steps
+extern tb_dec_stage_tmp
 extern suite_cmd_uci
 
 ; ============================================================
@@ -810,6 +814,13 @@ uci_setoption:
     test rax, rax
     jnz .opt_moveoverhead
 
+    mov rdi, r13
+    mov rsi, r14
+    lea rdx, [rel .str_evalmode]
+    call uci_str_eq
+    test rax, rax
+    jnz .opt_evalmode
+
     jmp .done
 
 .opt_hash:
@@ -978,6 +989,21 @@ uci_setoption:
     mov [uci_move_overhead], eax
     jmp .done
 
+.opt_evalmode:
+    mov rdi, r15
+    mov rsi, rbx
+    call uci_parse_int
+    test eax, eax
+    jge .evalmode_min_ok
+    xor eax, eax
+.evalmode_min_ok:
+    cmp eax, 2
+    jle .evalmode_store
+    mov eax, 2
+.evalmode_store:
+    mov [eval_mode], al
+    jmp .done
+
 .done:
     pop r15
     pop r14
@@ -992,6 +1018,7 @@ uci_setoption:
 .str_syzygypath: db "SyzygyPath", 0
 .str_syzygyprobedepth: db "SyzygyProbeDepth", 0
 .str_moveoverhead: db "MoveOverhead", 0
+.str_evalmode: db "EvalMode", 0
 .str_true:     db "true", 0
 .str_false:    db "false", 0
 
@@ -2229,6 +2256,8 @@ uci_loop:
     call write_cstr
     lea rdi, [uci_opt_overhead]
     call write_cstr
+    lea rdi, [uci_opt_evalmode]
+    call write_cstr
     lea rdi, [uci_ok]
     call write_cstr
     jmp .loop
@@ -2535,6 +2564,11 @@ uci_loop:
     mov eax, [tb_dec_trace_leaf_sym]
     movsxd rax, eax
     call print_number
+    lea rdi, [uci_tbtest_dec_stage]
+    call write_cstr
+    movzx eax, byte [tb_dec_stage_tmp]
+    movsxd rax, eax
+    call print_number
     lea rdi, [msg_newline]
     mov rdx, 1
     call write_str
@@ -2602,6 +2636,9 @@ uci_loop:
     lea rdi, [msg_newline]
     mov rdx, 1
     call write_str
+    test r12, r12
+    jz .loop
+    call bb_debug_mismatch
     jmp .loop
 
 .done:

@@ -1,4 +1,5 @@
 %include "tb/pairs/helpers.asm"
 %include "tb/pairs/index_encode.asm"
 %include "tb/pairs/symbol_decode.asm"
+%include "tb/pairs/wdl_fallback.asm"
 %include "tb/pairs/wdl_try.asm"

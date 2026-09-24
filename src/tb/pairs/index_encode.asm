@@ -457,6 +457,489 @@ tb_encode_111_num3_idx:
     ret
 
 ; ============================================================
+; tb_encode_piece_idx - prvy krok general encode API
+; Vstup: rdi = norm[8], rsi = pos[8], rdx = factor[8], ecx = bside
+; Vystup: eax = 1 success / 0 fail, rdx = idx
+; Pozn.: podporuje regular enc_type=0/2 aj CONNECTED_KINGS enc_type=3.
+; ============================================================
+tb_encode_piece_idx:
+    push rbx
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov r15, rdx                  ; factor ptr
+
+    mov eax, [tb_enc_type]
+    cmp eax, 0
+    je .enc0
+    cmp eax, 2
+    je .enc2
+    cmp eax, 3
+    je .enc3
+
+    ; ostatne enc_type mimo scope.
+    jmp .fail
+
+.enc0:
+    mov r12d, [tb_num]
+    cmp r12d, 3
+    jb .fail
+    mov r14d, 3                   ; first non-king-ish group limit pre diagonal test
+    jmp .enc_regular_transform
+
+.enc2:
+    mov r12d, [tb_num]
+    cmp r12d, 2
+    jb .fail
+    mov r14d, 2                   ; first non-king-ish group limit pre diagonal test
+
+.enc_regular_transform:
+    ; if (pos0 & 0x04) pos[i] ^= 0x07
+    mov eax, [rsi]
+    test eax, 4
+    jz .reg_rank
+    xor r10d, r10d
+.reg_xor7:
+    cmp r10d, r12d
+    jae .reg_rank
+    mov eax, [rsi + r10*4]
+    xor eax, 7
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .reg_xor7
+
+.reg_rank:
+    ; if (pos0 & 0x20) pos[i] ^= 0x38
+    mov eax, [rsi]
+    test eax, 32
+    jz .reg_diag_scan
+    xor r10d, r10d
+.reg_xor56:
+    cmp r10d, r12d
+    jae .reg_diag_scan
+    mov eax, [rsi + r10*4]
+    xor eax, 56
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .reg_xor56
+
+.reg_diag_scan:
+    ; najdi prvy offdiag(pos[i]) != 0
+    lea r8, [tb_offdiag]
+    xor r10d, r10d
+.reg_find_first_offdiag:
+    cmp r10d, r12d
+    jae .reg_core
+    mov eax, [rsi + r10*4]
+    movsx ebx, byte [r8 + rax]
+    test ebx, ebx
+    jnz .reg_have_offdiag
+    inc r10d
+    jmp .reg_find_first_offdiag
+
+.reg_have_offdiag:
+    cmp r10d, r14d
+    jae .reg_core
+    cmp ebx, 0
+    jle .reg_core
+
+    ; flipdiag all
+    lea r8, [tb_flipdiag]
+    xor r10d, r10d
+.reg_flipdiag_all:
+    cmp r10d, r12d
+    jae .reg_core
+    mov eax, [rsi + r10*4]
+    movzx eax, byte [r8 + rax]
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .reg_flipdiag_all
+
+.reg_core:
+    mov eax, [tb_enc_type]
+    cmp eax, 0
+    je .reg_core_enc0
+
+    ; enc_type=2 core (11)
+    mov eax, [rsi]                ; p0
+    mov ecx, [rsi + 4]            ; p1
+    xor r8d, r8d
+    cmp ecx, eax
+    setg r8b                      ; i = p1 > p0
+
+    lea r9, [tb_offdiag]
+    movsx ebx, byte [r9 + rax]
+    test ebx, ebx
+    jz .reg2_chk_p1
+
+    lea r9, [tb_triangle]
+    movzx ebx, byte [r9 + rax]
+    imul ebx, ebx, 63
+    mov edx, ecx
+    sub edx, r8d
+    add ebx, edx
+    jmp .reg_core_done
+
+.reg2_chk_p1:
+    movsx ebx, byte [r9 + rcx]
+    test ebx, ebx
+    jz .reg2_both_diag
+
+    lea r9, [tb_diag]
+    movzx ebx, byte [r9 + rax]
+    imul ebx, ebx, 28
+    add ebx, 378                  ; 6*63
+    lea r9, [tb_lower]
+    movzx edx, byte [r9 + rcx]
+    add ebx, edx
+    jmp .reg_core_done
+
+.reg2_both_diag:
+    lea r9, [tb_diag]
+    movzx ebx, byte [r9 + rax]
+    imul ebx, ebx, 7
+    add ebx, 490                  ; 6*63 + 4*28
+    movzx edx, byte [r9 + rcx]
+    sub edx, r8d
+    add ebx, edx
+    jmp .reg_core_done
+
+.reg_core_enc0:
+    cmp r12d, 3
+    jb .fail
+
+    mov eax, [rsi]                ; p0
+    mov ecx, [rsi + 4]            ; p1
+    mov edx, [rsi + 8]            ; p2
+
+    xor r8d, r8d
+    cmp ecx, eax
+    setg r8b                      ; i = p1 > p0
+
+    xor r9d, r9d
+    cmp edx, eax
+    setg r9b
+    xor r10d, r10d
+    cmp edx, ecx
+    setg r10b
+    add r9d, r10d                 ; j = (p2>p0) + (p2>p1)
+
+    lea r11, [tb_offdiag]
+    movsx ebx, byte [r11 + rax]
+    test ebx, ebx
+    jz .reg0_chk_p1
+
+    lea r11, [tb_triangle]
+    movzx ebx, byte [r11 + rax]
+    imul ebx, ebx, 3906           ; 63*62
+    mov r10d, ecx
+    sub r10d, r8d
+    imul r10d, r10d, 62
+    add ebx, r10d
+    mov r10d, edx
+    sub r10d, r9d
+    add ebx, r10d
+    jmp .reg_core_done
+
+.reg0_chk_p1:
+    movsx ebx, byte [r11 + rcx]
+    test ebx, ebx
+    jz .reg0_chk_p2
+
+    lea r11, [tb_diag]
+    movzx ebx, byte [r11 + rax]
+    imul ebx, ebx, 1736           ; 28*62
+    add ebx, 23436                ; 6*63*62
+    lea r11, [tb_lower]
+    movzx r10d, byte [r11 + rcx]
+    imul r10d, r10d, 62
+    add ebx, r10d
+    mov r10d, edx
+    sub r10d, r9d
+    add ebx, r10d
+    jmp .reg_core_done
+
+.reg0_chk_p2:
+    movsx ebx, byte [r11 + rdx]
+    test ebx, ebx
+    jz .reg0_all_diag
+
+    lea r11, [tb_diag]
+    movzx ebx, byte [r11 + rax]
+    imul ebx, ebx, 196            ; 7*28
+    add ebx, 27888                ; 6*63*62 + 4*28*62
+    movzx r10d, byte [r11 + rcx]
+    sub r10d, r8d
+    imul r10d, r10d, 28
+    add ebx, r10d
+    lea r11, [tb_lower]
+    movzx r10d, byte [r11 + rdx]
+    add ebx, r10d
+    jmp .reg_core_done
+
+.reg0_all_diag:
+    lea r11, [tb_diag]
+    movzx ebx, byte [r11 + rax]
+    imul ebx, ebx, 42             ; 7*6
+    add ebx, 28672                ; 6*63*62 + 4*28*62 + 4*7*28
+    movzx r10d, byte [r11 + rcx]
+    sub r10d, r8d
+    imul r10d, r10d, 6
+    add ebx, r10d
+    movzx r10d, byte [r11 + rdx]
+    sub r10d, r9d
+    add ebx, r10d
+
+.reg_core_done:
+    mov r11, rbx
+    mov eax, [tb_enc_type]
+    cmp eax, 0
+    je .reg_i3
+    mov r13d, 2
+    jmp .reg_scale
+.reg_i3:
+    mov r13d, 3
+
+.reg_scale:
+    imul r11, qword [r15]         ; idx *= factor[0]
+    jmp .tail_outer
+
+.enc3:
+    ; scope: enc_type=3 (CONNECTED_KINGS vetva), num >= 2
+    mov r12d, [tb_num]
+    cmp r12d, 2
+    jb .fail
+
+    ; if triangle[pos0] > triangle[pos1] swap(pos0,pos1)
+    lea r8, [tb_triangle]
+    mov eax, [rsi]
+    mov ecx, [rsi + 4]
+    movzx ebx, byte [r8 + rax]
+    movzx r9d, byte [r8 + rcx]
+    cmp ebx, r9d
+    jle .enc3_no_swap01
+    mov [rsi], ecx
+    mov [rsi + 4], eax
+.enc3_no_swap01:
+
+    ; if (pos0 & 0x04) pos[i] ^= 0x07
+    mov eax, [rsi]
+    test eax, 4
+    jz .enc3_rank
+    xor r10d, r10d
+.enc3_xor7:
+    cmp r10d, r12d
+    jae .enc3_rank
+    mov eax, [rsi + r10*4]
+    xor eax, 7
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .enc3_xor7
+
+.enc3_rank:
+    ; if (pos0 & 0x20) pos[i] ^= 0x38
+    mov eax, [rsi]
+    test eax, 32
+    jz .enc3_diag
+    xor r10d, r10d
+.enc3_xor56:
+    cmp r10d, r12d
+    jae .enc3_diag
+    mov eax, [rsi + r10*4]
+    xor eax, 56
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .enc3_xor56
+
+.enc3_diag:
+    ; if offdiag[pos0] > 0 || (offdiag[pos0]==0 && offdiag[pos1] > 0) flipdiag all
+    lea r8, [tb_offdiag]
+    mov eax, [rsi]
+    movsx ebx, byte [r8 + rax]
+    cmp ebx, 0
+    jg .enc3_do_flipdiag
+    jne .enc3_test45
+    mov eax, [rsi + 4]
+    movsx ebx, byte [r8 + rax]
+    cmp ebx, 0
+    jle .enc3_test45
+
+.enc3_do_flipdiag:
+    lea r8, [tb_flipdiag]
+    xor r10d, r10d
+.enc3_flipdiag_loop:
+    cmp r10d, r12d
+    jae .enc3_test45
+    mov eax, [rsi + r10*4]
+    movzx eax, byte [r8 + rax]
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .enc3_flipdiag_loop
+
+.enc3_test45:
+    ; if test45[pos1] && triangle[pos0] == triangle[pos1]
+    lea r8, [tb_test45]
+    mov eax, [rsi + 4]
+    movzx eax, byte [r8 + rax]
+    test eax, eax
+    jz .enc3_idx
+
+    lea r8, [tb_triangle]
+    mov eax, [rsi]
+    mov ecx, [rsi + 4]
+    movzx ebx, byte [r8 + rax]
+    movzx r9d, byte [r8 + rcx]
+    cmp ebx, r9d
+    jne .enc3_idx
+
+    ; swap(pos0,pos1)
+    mov [rsi], ecx
+    mov [rsi + 4], eax
+
+    ; pos[i] = flipdiag[pos[i] ^ 0x38]
+    lea r8, [tb_flipdiag]
+    xor r10d, r10d
+.enc3_flipdiag_xor56_loop:
+    cmp r10d, r12d
+    jae .enc3_idx
+    mov eax, [rsi + r10*4]
+    xor eax, 56
+    movzx eax, byte [r8 + rax]
+    mov [rsi + r10*4], eax
+    inc r10d
+    jmp .enc3_flipdiag_xor56_loop
+
+.enc3_idx:
+    lea r8, [tb_triangle]
+    mov eax, [rsi]
+    mov ecx, [rsi + 4]
+    movzx ebx, byte [r8 + rax]    ; tri(pos0)
+
+    lea r8, [tb_PP_idx]
+    mov eax, ebx
+    imul eax, eax, 64
+    add eax, ecx
+    movsx r10d, word [r8 + rax*2]
+    cmp r10d, 0
+    jl .fail
+
+    mov r13d, 2                   ; i = 2
+    mov r11, r10                  ; idx
+    imul r11, qword [r15]         ; idx *= factor[0]
+
+.tail_outer:
+    cmp r13d, r12d
+    jae .tail_done
+
+    mov r14d, [rdi + r13*4]       ; t = norm[i]
+    test r14d, r14d
+    jle .fail
+
+    ; sort groups of identical pieces
+    mov r8d, r13d
+.sort_j:
+    mov eax, r13d
+    add eax, r14d
+    cmp r8d, eax
+    jae .sort_done
+    mov r9d, r8d
+    inc r9d
+.sort_k:
+    cmp r9d, eax
+    jae .sort_j_next
+    mov ebx, [rsi + r8*4]
+    mov ecx, [rsi + r9*4]
+    cmp ebx, ecx
+    jle .sort_k_next
+    mov [rsi + r8*4], ecx
+    mov [rsi + r9*4], ebx
+.sort_k_next:
+    inc r9d
+    jmp .sort_k
+.sort_j_next:
+    inc r8d
+    jmp .sort_j
+.sort_done:
+    xor r10, r10                  ; s = 0
+    mov r8d, r13d                 ; m = i
+.sum_m:
+    mov eax, r13d
+    add eax, r14d
+    cmp r8d, eax
+    jae .sum_done
+
+    mov ebx, [rsi + r8*4]         ; p
+    xor r9d, r9d                  ; j = 0
+    xor ecx, ecx                  ; l = 0
+.sum_l:
+    cmp ecx, r13d
+    jae .sum_l_done
+    mov eax, [rsi + rcx*4]
+    cmp ebx, eax
+    setg al
+    movzx eax, al
+    add r9d, eax
+    inc ecx
+    jmp .sum_l
+.sum_l_done:
+
+    mov eax, ebx
+    sub eax, r9d                  ; n = p - j
+    cmp eax, 0
+    jl .fail
+
+    push rdi
+    push rsi
+    push rdx
+    mov edi, r8d
+    sub edi, r13d
+    inc edi                       ; k = m - i + 1
+    mov esi, eax
+    call tb_subfactor             ; C(n, k)
+    pop rdx
+    pop rsi
+    pop rdi
+    add r10, rax
+
+    inc r8d
+    jmp .sum_m
+
+.sum_done:
+    mov rax, [r15 + r13*8]
+    imul r10, rax
+    add r11, r10
+
+    add r13d, r14d
+    jmp .tail_outer
+
+.tail_done:
+    mov rdx, r11
+    mov eax, 1
+    jmp .done
+
+.fail:
+    xor eax, eax
+    xor edx, edx
+
+.done:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbx
+    ret
+
+; ============================================================
 ; tb_pairs_decode_symbol_idx - decode raw symbol zo setup_pairs a idx
 ; Vstup: rdi = setup_pairs ptr, rsi = map_end, rdx = tb_size, rcx = idx
 ; Vystup: eax = 1 success / 0 fail, edx = raw symbol

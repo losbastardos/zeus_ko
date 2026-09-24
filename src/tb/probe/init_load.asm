@@ -103,45 +103,13 @@ tb_build_wdl_path:
     inc r8
 
 .name_start:
-    ; canonical: K{W}v{B}K / K{W}vK / Kv{B}K / KvK
-    cmp r8, TB_PATH_MAX - 1
-    jae .fail
-    mov byte [rdi + r8], 'K'
-    inc r8
-
-    test r13d, r13d
-    jz .no_white_piece
-    mov edx, r13d
-    call tb_piece_char
-    test al, al
+    call tb_material_scan
+    lea rdi, [tb_file_path]
+    mov rsi, r8
+    call tb_build_canonical_name
+    test rax, rax
     jz .fail
-    cmp r8, TB_PATH_MAX - 1
-    jae .fail
-    mov [rdi + r8], al
-    inc r8
-
-.no_white_piece:
-    cmp r8, TB_PATH_MAX - 1
-    jae .fail
-    mov byte [rdi + r8], 'v'
-    inc r8
-
-    test r14d, r14d
-    jz .no_black_piece
-    mov edx, r14d
-    call tb_piece_char
-    test al, al
-    jz .fail
-    cmp r8, TB_PATH_MAX - 1
-    jae .fail
-    mov [rdi + r8], al
-    inc r8
-
-.no_black_piece:
-    cmp r8, TB_PATH_MAX - 1
-    jae .fail
-    mov byte [rdi + r8], 'K'
-    inc r8
+    mov r8, rax
 
     ; suffix .rtbw
     cmp r8, TB_PATH_MAX - 6

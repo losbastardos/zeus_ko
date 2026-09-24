@@ -26,6 +26,9 @@ tb_try_constant_wdl:
     cmp r14d, PAWN
     je .pawn_table
 
+    cmp dword [tb_num], 4
+    je .full4_decode
+
     call tb_wdl_is_target_3pc_pawnless
     test eax, eax
     jz .pawnless_legacy
@@ -156,6 +159,8 @@ tb_try_constant_wdl:
     jz .not_found
     mov r10d, edx
     jmp .raw_to_class
+
+%include "tb/pairs/wdl_full4_decode.asm"
 
 .pawnless_legacy:
 
@@ -543,6 +548,7 @@ tb_try_constant_wdl:
     jmp .done
 
 .not_found:
+.nf_regular:
     cmp byte [tb_wdl_pairs_is_const], 4
     jne .nf_keep
     mov byte [tb_wdl_pairs_is_const], 8
@@ -556,9 +562,3 @@ tb_try_constant_wdl:
     pop rcx
     pop rbx
     ret
-
-; ============================================================
-; tb_piece_char - prevedie typ figury na znak Q/R/B/N/P
-; Vstup: edx = typ figury
-; Vystup: al = ASCII znak alebo 0
-; ============================================================

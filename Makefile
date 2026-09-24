@@ -231,3 +231,7 @@ syzygy-3piece: syzygy-tools
 	@echo "Generating real 3-piece Syzygy tables into tb/*.rtbw and tb/*.rtbz ..."
 	@TBGEN='cd $(CURDIR)/tb && export RTBPATH=$(CURDIR)/tb && case "{canonical}" in *P*) $(CURDIR)/tb/syzygy-tb/src/rtbgenp {canonical} ;; *) $(CURDIR)/tb/syzygy-tb/src/rtbgen {canonical} ;; esac' \
 	  bash tb/generate_3piece.sh
+
+syzygy-4piece: syzygy-tools
+	@echo "Generating real 4-piece pawnless Syzygy tables into tb/*.rtbw and tb/*.rtbz ..."
+	@bash tb/generate_4piece.sh
