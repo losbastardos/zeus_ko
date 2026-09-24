@@ -1,9 +1,9 @@
-# 4-piece pawnless cases for make tb-oracle-compare CASES=...
-krvkb_white|8/8/8/8/8/8/4K2R/k5b1 w - - 0 1
-krvkb_black|8/8/8/8/8/8/4k2r/K5B1 b - - 0 1
-krvkn_white|8/8/8/8/8/8/4K2R/k5n1 w - - 0 1
-krvkn_black|8/8/8/8/8/8/4k2r/K5N1 b - - 0 1
-kbbvk_white|8/8/8/8/8/8/4K1BB/k7 w - - 0 1
-kbbvk_black|8/8/8/8/8/8/4k1bb/K7 b - - 0 1
-kbnvk_white|8/8/8/8/8/8/4K1BN/k7 w - - 0 1
-kbnvk_black|8/8/8/8/8/8/4k1bn/K7 b - - 0 1
+# 4-piece pawnful TB test cases (FEN; expected WDL; expected DTZ)
+# Generated from python-chess Syzygy oracle.
+8/8/8/8/8/7P/4K3/k6B w - - 0 1;2;1
+8/8/8/8/8/7P/4K3/k6N w - - 0 1;2;1
+8/8/8/8/8/6PP/4K3/k7 w - - 0 1;2;1
+8/8/8/8/8/7P/4K3/k6P w - - 0 1;2;1
+8/8/8/8/8/7P/4K2R/k7 w - - 0 1;2;1
+8/8/8/8/8/7P/4K2Q/k7 w - - 0 1;2;1
+8/8/8/8/8/6p1/4K3/k6B w - - 0 1;0;0

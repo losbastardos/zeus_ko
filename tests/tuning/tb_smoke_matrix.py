@@ -98,6 +98,24 @@ CASES = [
         expect_wdl_value=2,
         expect_dtz_value=1,
     ),
+    Case(
+        name="krpvk_white",
+        position_cmd="position fen 8/8/8/8/8/7P/4K2R/k7 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
+    ),
+    Case(
+        name="kqpvk_white",
+        position_cmd="position fen 8/8/8/8/8/7P/4K2Q/k7 w - - 0 1",
+        expect_pieces=4,
+        expect_wdl_found=True,
+        expect_dtz_found=True,
+        expect_wdl_value=2,
+        expect_dtz_value=1,
+    ),
 ]
 
 
