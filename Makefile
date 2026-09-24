@@ -170,7 +170,11 @@ search-ablation-scan:
 lmr-lmp-rfp-scan: $(TARGET_STATIC)
 	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
 	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
-	$(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),6,8)" --timeout "$(or $(TIMEOUT),900s)" --report "$(or $(REPORT),tests/reports/lmr_lmp_rfp_scan.txt)" --csv "$(or $(CSV),tests/reports/lmr_lmp_rfp_scan.csv)"
+	if [[ -n "$(MOVETIME)" ]]; then \
+	  $(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --movetime "$(MOVETIME)" --timeout "$(or $(TIMEOUT),1800s)" --report "$(or $(REPORT),tests/reports/lmr_lmp_rfp_scan.txt)" --csv "$(or $(CSV),tests/reports/lmr_lmp_rfp_scan.csv)"; \
+	else \
+	  $(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),6,8)" --timeout "$(or $(TIMEOUT),900s)" --report "$(or $(REPORT),tests/reports/lmr_lmp_rfp_scan.txt)" --csv "$(or $(CSV),tests/reports/lmr_lmp_rfp_scan.csv)"; \
+	fi
 
 commands-log-tail:
 	@if [[ ! -f "$(COMMANDS_DEBUG_LOG)" ]]; then echo "log file not found: $(COMMANDS_DEBUG_LOG)"; exit 1; fi
