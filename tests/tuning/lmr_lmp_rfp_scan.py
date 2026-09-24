@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="LMR/LMP/RFP factorial scan")
     p.add_argument("--suite", default="tests/suites/external/arasan2026.epd")
     p.add_argument("--depths", default="6,8")
+    p.add_argument("--movetime", type=int, default=0,
+                   help="ak > 0, pouzi time-based suite s max depth 64 a zadanou movetime ms")
     p.add_argument("--timeout", default="900s")
     p.add_argument("--report", default="tests/reports/lmr_lmp_rfp_scan.txt")
     p.add_argument("--csv", default="tests/reports/lmr_lmp_rfp_scan.csv")
@@ -52,11 +54,18 @@ def run_cmd(cmd: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
 
-def suite_score(engine: str, depth: int, suite: str, timeout_s: str) -> Tuple[int, int, int, str]:
-    cmd = (
-        f"timeout {timeout_s} sh -c "
-        f"'printf \"uci\\nsuite {suite} {depth}\\nquit\\n\" | ./{engine} --uci'"
-    )
+def suite_score(engine: str, depth: int, suite: str, timeout_s: str,
+                movetime_ms: int = 0) -> Tuple[int, int, int, str]:
+    if movetime_ms > 0:
+        cmd = (
+            f"timeout {timeout_s} sh -c "
+            f"'printf \"uci\\nsuite {suite} 64 {movetime_ms}\\nquit\\n\" | ./{engine} --uci'"
+        )
+    else:
+        cmd = (
+            f"timeout {timeout_s} sh -c "
+            f"'printf \"uci\\nsuite {suite} {depth}\\nquit\\n\" | ./{engine} --uci'"
+        )
     p = run_cmd(cmd)
     m = RESULT_RE.search(p.stdout)
     if not m:
@@ -92,6 +101,8 @@ def write_reports(rows: List[RunRow], report_path: str, csv_path: str, suite: st
 def main() -> int:
     args = parse_args()
     depths = [int(x.strip()) for x in args.depths.split(",") if x.strip()]
+    use_time = args.movetime > 0
+    run_label = f"movetime={args.movetime}ms" if use_time else args.depths
     rows: List[RunRow] = []
     try:
         for lmr in (0, 1):
@@ -101,21 +112,29 @@ def main() -> int:
                     defs = defines(lmr, lmp, rfp)
                     print(f"building {name} ...")
                     if build_variant(name, defs) != 0:
-                        for d in depths:
-                            rows.append(RunRow(name, lmr, lmp, rfp, d, 0, 0, 2))
-                        write_reports(rows, args.report, args.csv, args.suite, args.depths)
+                        fill_depth = args.movetime if use_time else (depths[0] if depths else 0)
+                        rows.append(RunRow(name, lmr, lmp, rfp, fill_depth, 0, 0, 2))
+                        write_reports(rows, args.report, args.csv, args.suite, run_label)
                         continue
-                    for d in depths:
-                        print(f"running {name} depth={d} ...")
-                        rc, hits, total, _ = suite_score(name, d, args.suite, args.timeout)
-                        rows.append(RunRow(name, lmr, lmp, rfp, d, hits, total, rc))
+                    if use_time:
+                        print(f"running {name} movetime={args.movetime}ms ...")
+                        rc, hits, total, _ = suite_score(name, 0, args.suite, args.timeout,
+                                                         movetime_ms=args.movetime)
+                        rows.append(RunRow(name, lmr, lmp, rfp, args.movetime, hits, total, rc))
                         print(f"  score={hits}/{total} rc={rc}")
-                        write_reports(rows, args.report, args.csv, args.suite, args.depths)
+                        write_reports(rows, args.report, args.csv, args.suite, run_label)
+                    else:
+                        for d in depths:
+                            print(f"running {name} depth={d} ...")
+                            rc, hits, total, _ = suite_score(name, d, args.suite, args.timeout)
+                            rows.append(RunRow(name, lmr, lmp, rfp, d, hits, total, rc))
+                            print(f"  score={hits}/{total} rc={rc}")
+                            write_reports(rows, args.report, args.csv, args.suite, run_label)
     except KeyboardInterrupt:
         print("interrupted: partial report written")
         return 130
     finally:
-        write_reports(rows, args.report, args.csv, args.suite, args.depths)
+        write_reports(rows, args.report, args.csv, args.suite, run_label)
         print(f"report: {args.report}")
         print(f"csv:    {args.csv}")
     return 0
