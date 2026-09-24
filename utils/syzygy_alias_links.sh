@@ -25,6 +25,25 @@ for ext in rtbw rtbz; do
     dst="$TB_DIR/${alias_name}.${ext}"
     ln -sfn "$base" "$dst"
     count=$((count + 1))
+
+    # Reverzny alias: KRvKB -> KBvKR, KBBvK -> KvKBB.
+    if [[ "$name" =~ ^K([^v]*)vK(.*)$ ]]; then
+      left="${BASH_REMATCH[1]}"
+      right="${BASH_REMATCH[2]}"
+      rev_name="K${right}vK${left}"
+      if [[ "$rev_name" != "$name" ]]; then
+        rev_dst="$TB_DIR/${rev_name}.${ext}"
+        ln -sfn "$base" "$rev_dst"
+        count=$((count + 1))
+
+        rev_alias_name="${rev_name#K}"
+        if [[ -n "$rev_alias_name" ]]; then
+          rev_alias_dst="$TB_DIR/${rev_alias_name}.${ext}"
+          ln -sfn "$base" "$rev_alias_dst"
+          count=$((count + 1))
+        fi
+      fi
+    fi
   done
   shopt -u nullglob
 done
