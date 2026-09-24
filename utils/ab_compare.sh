@@ -89,11 +89,17 @@ echo "Running A/B suites"
 echo "- candidate: $CANDIDATE_PATH"
 echo "- baseline:  $BASELINE_PATH"
 
-read -r cand_bf cand_bf_total cand_bf_nodes cand_bf_time < <(run_suite "$CANDIDATE_PATH" tests/suites/bf_regression.fenbm "$BF_DEPTH" "$BF_TIMEOUT_SEC")
-read -r base_bf base_bf_total base_bf_nodes base_bf_time < <(run_suite "$BASELINE_PATH" tests/suites/bf_regression.fenbm "$BF_DEPTH" "$BF_TIMEOUT_SEC")
+suite_out="$(run_suite "$CANDIDATE_PATH" tests/suites/bf_regression.fenbm "$BF_DEPTH" "$BF_TIMEOUT_SEC")"
+read -r cand_bf cand_bf_total cand_bf_nodes cand_bf_time <<<"$suite_out"
 
-read -r cand_ar cand_ar_total cand_ar_nodes cand_ar_time < <(run_suite "$CANDIDATE_PATH" tests/suites/external/arasan2026.epd "$ARASAN_DEPTH" "$ARASAN_TIMEOUT_SEC")
-read -r base_ar base_ar_total base_ar_nodes base_ar_time < <(run_suite "$BASELINE_PATH" tests/suites/external/arasan2026.epd "$ARASAN_DEPTH" "$ARASAN_TIMEOUT_SEC")
+suite_out="$(run_suite "$BASELINE_PATH" tests/suites/bf_regression.fenbm "$BF_DEPTH" "$BF_TIMEOUT_SEC")"
+read -r base_bf base_bf_total base_bf_nodes base_bf_time <<<"$suite_out"
+
+suite_out="$(run_suite "$CANDIDATE_PATH" tests/suites/external/arasan2026.epd "$ARASAN_DEPTH" "$ARASAN_TIMEOUT_SEC")"
+read -r cand_ar cand_ar_total cand_ar_nodes cand_ar_time <<<"$suite_out"
+
+suite_out="$(run_suite "$BASELINE_PATH" tests/suites/external/arasan2026.epd "$ARASAN_DEPTH" "$ARASAN_TIMEOUT_SEC")"
+read -r base_ar base_ar_total base_ar_nodes base_ar_time <<<"$suite_out"
 
 delta_bf=$((cand_bf - base_bf))
 delta_ar=$((cand_ar - base_ar))
