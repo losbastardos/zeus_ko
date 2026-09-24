@@ -162,6 +162,8 @@ section .bss
 nnue2_buf:   resb 150000
 nnue2_ready: resb 1
 
+global nnue2_ready
+
 section .data
 nnue2_H:      dd 0
 nnue2_shift1: dd 0

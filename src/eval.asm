@@ -129,7 +129,7 @@ section .text
 
 extern board
 extern side, eval_mode
-extern nnue2_eval
+extern nnue2_eval, nnue2_ready
 
 ; ============================================================
 ; MOB_WALK df, dr, sliding - krok/luc mobility z policka
@@ -290,6 +290,8 @@ evaluate:
 
     ; NNUE faza 2: priama evaluacia 1-skrytou-vrstvou sietou
     cmp byte [eval_mode], 2
+    jne .classic_eval
+    cmp byte [nnue2_ready], 1
     jne .classic_eval
     call nnue2_eval
     jmp .neg_done_early
