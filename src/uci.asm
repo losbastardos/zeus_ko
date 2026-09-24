@@ -36,7 +36,7 @@ uci_opt_ponder:  db "option name Ponder type check default false", 10, 0
 uci_opt_syzygy:  db "option name SyzygyPath type string default <empty>", 10, 0
 uci_opt_syzygy_depth: db "option name SyzygyProbeDepth type spin default 1 min 0 max 64", 10, 0
 uci_opt_overhead: db "option name MoveOverhead type spin default 100 min 0 max 10000", 10, 0
-uci_opt_evalmode: db "option name EvalMode type spin default 0 min 0 max 2", 10, 0
+uci_opt_evalmode: db "option name EvalMode type spin default 2 min 0 max 2", 10, 0
 
 uci_ready:
     db "readyok", 10, 0
