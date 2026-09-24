@@ -31,7 +31,7 @@ COMMANDS_DEBUG_LOG ?= commands_debug.log
 COMMANDS_DEBUG ?= $(shell awk -F= 'tolower($$1) ~ /^[[:space:]]*debug[[:space:]]*$$/ {v=tolower($$2); gsub(/[[:space:]]/,"",v); print (v ~ /^(1|true|yes|on)$$/ ? 1 : 0); found=1; exit} END {if (!found) print 0}' chess.ini 2>/dev/null)
 LOG_RUN = COMMANDS_DEBUG=$(COMMANDS_DEBUG) COMMANDS_DEBUG_LOG=$(COMMANDS_DEBUG_LOG) bash tests/tuning/command_debug_run.sh
 
-.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings
+.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings variant-static variant-rfp0 variant-lmr0 variant-lmp0 variant-null0
 
 all: $(TARGET) $(TARGET_STATIC)
 
@@ -181,6 +181,24 @@ ab-compare-report:
 
 ab-history:
 	$(LOG_RUN) "bash utils/ab_history_tail.sh tests/reports/ab_history.tsv $(or $(N),10)"
+
+# Build statickej kandidatnej binarky s vlastnymi NASM definiciami.
+# Priklad: make variant-static OUT=chess-static-rfp0 DEFINES='-DENABLE_RFP=0'
+variant-static:
+	@if [ -z "$(OUT)" ]; then echo "Usage: make variant-static OUT=./candidate DEFINES='-DENABLE_RFP=0' [OBJDIR_VARIANT=obj/candidate]"; exit 2; fi
+	$(MAKE) TARGET_STATIC="$(OUT)" OBJDIR="$(or $(OBJDIR_VARIANT),obj/$(OUT))" EXTRA_DEFINES="$(DEFINES)" "$(OUT)"
+
+variant-rfp0:
+	$(MAKE) variant-static OUT=chess-static-rfp0 DEFINES='-DENABLE_RFP=0'
+
+variant-lmr0:
+	$(MAKE) variant-static OUT=chess-static-lmr0 DEFINES='-DENABLE_LMR=0'
+
+variant-lmp0:
+	$(MAKE) variant-static OUT=chess-static-lmp0 DEFINES='-DENABLE_LMP=0'
+
+variant-null0:
+	$(MAKE) variant-static OUT=chess-static-null0 DEFINES='-DENABLE_NULL_PRUNE=0'
 
 nightly-pipeline:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make nightly-pipeline CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
