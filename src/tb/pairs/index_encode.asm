@@ -940,6 +940,273 @@ tb_encode_piece_idx:
     ret
 
 ; ============================================================
+; tb_encode_pawn_idx - idx pre pawnful TB (podla syzygy encode_pawn)
+; Vstup: pozicie v tb_tmp_pos[0..tb_num-1] (v poradi pieces[] tabulky)
+; Vystup: eax = 1 success / 0 fail, rdx = idx
+; Pouziva: tb_tmp_pos, tb_num, tb_pawns0, tb_pawns1, tb_norm, tb_factor,
+;          tb_flap, tb_ptwist, tb_pawnidx, tb_binomial
+; ============================================================
+global tb_encode_pawn_idx
+tb_encode_pawn_idx:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov r15d, [tb_num]
+    cmp r15d, 2
+    jb .fail
+
+    ; ak je prvy pesiak na file e-h, zrkadli vsetky policka
+    lea rsi, [tb_tmp_pos]
+    mov eax, [rsi]
+    test eax, 4
+    jz .mirror_done
+    xor ecx, ecx
+.mirror_loop:
+    cmp ecx, r15d
+    jae .mirror_done
+    mov eax, [rsi + rcx*4]
+    xor eax, 7
+    mov [rsi + rcx*4], eax
+    inc ecx
+    jmp .mirror_loop
+.mirror_done:
+
+    ; sort pawns[1..pawns0-1] podla ptwist zostupne
+    mov r13d, [tb_pawns0]
+    cmp r13d, 1
+    jle .pawns_sorted
+    mov r14d, 1
+.sort_i:
+    mov eax, r14d
+    inc eax
+    cmp eax, r13d
+    jae .pawns_sorted
+    mov r12d, eax
+.sort_j:
+    cmp r12d, r13d
+    jae .sort_i_next
+    mov eax, [rsi + r14*4]
+    mov ebx, [rsi + r12*4]
+    lea rdx, [tb_ptwist]
+    movzx eax, byte [rdx + rax]
+    movzx ebx, byte [rdx + rbx]
+    cmp eax, ebx
+    jge .sort_j_next
+    ; swap
+    mov eax, [rsi + r14*4]
+    mov ebx, [rsi + r12*4]
+    mov [rsi + r14*4], ebx
+    mov [rsi + r12*4], eax
+.sort_j_next:
+    inc r12d
+    jmp .sort_j
+.sort_i_next:
+    inc r14d
+    jmp .sort_i
+.pawns_sorted:
+
+    ; idx = pawnidx[t][flap[pos[0]]]
+    mov eax, [rsi]
+    lea rdx, [tb_flap]
+    movzx eax, byte [rdx + rax]
+    mov r12d, eax                 ; flap[pos0]
+    mov r11d, r13d
+    dec r11d                      ; t = pawns0 - 1
+    mov rax, r11
+    imul rax, rax, 24
+    add rax, r12
+    lea rdx, [tb_pawnidx]
+    mov r10, [rdx + rax*8]        ; idx (qword)
+
+    ; for i = t; i > 0; i--
+    mov r14d, r11d
+.pawn_binom_loop:
+    cmp r14d, 0
+    jle .pawn_binom_done
+    mov eax, [rsi + r14*4]
+    lea rdx, [tb_ptwist]
+    movzx eax, byte [rdx + rax]   ; ptwist[pos[i]]
+    mov ebx, r11d
+    sub ebx, r14d
+    inc ebx                       ; t - i + 1
+    mov rdx, rbx
+    imul rdx, rdx, 64
+    add rdx, rax
+    lea rax, [tb_binomial]
+    add r10, [rax + rdx*8]
+    dec r14d
+    jmp .pawn_binom_loop
+.pawn_binom_done:
+
+    ; idx *= factor[0]
+    lea rax, [tb_factor]
+    mov rax, [rax]
+    imul r10, rax
+
+    ; remaining pawns (pawns1)
+    mov r14d, r13d                ; i = pawns0
+    mov r13d, [tb_pawns1]
+    mov eax, r14d
+    add eax, r13d                 ; t = i + pawns1
+    cmp eax, r14d
+    je .pawns1_skip
+    mov r12d, eax
+    ; sort pos[i..t-1] vzostupne
+    mov r8d, r14d
+.p1_sort_i:
+    mov eax, r8d
+    inc eax
+    cmp eax, r12d
+    jae .p1_sort_done
+    mov r9d, eax
+.p1_sort_j:
+    cmp r9d, r12d
+    jae .p1_sort_i_next
+    mov eax, [rsi + r8*4]
+    mov ebx, [rsi + r9*4]
+    cmp eax, ebx
+    jle .p1_sort_j_next
+    mov [rsi + r8*4], ebx
+    mov [rsi + r9*4], eax
+.p1_sort_j_next:
+    inc r9d
+    jmp .p1_sort_j
+.p1_sort_i_next:
+    inc r8d
+    jmp .p1_sort_i
+.p1_sort_done:
+    ; s = sum binomial[m-i+1][p - j - 8]
+    xor r11, r11                  ; s
+    mov r8d, r14d                 ; m
+.p1_sum:
+    cmp r8d, r12d
+    jae .p1_sum_done
+    mov eax, [rsi + r8*4]
+    xor r9, r9                    ; j
+    xor ecx, ecx                  ; count all previous pieces (0..m-1)
+.p1_count:
+    cmp ecx, r14d
+    jae .p1_have_count
+    mov ebx, [rsi + rcx*4]
+    cmp eax, ebx
+    jle .p1_count_next
+    inc r9d
+.p1_count_next:
+    inc ecx
+    jmp .p1_count
+.p1_have_count:
+    sub eax, r9d
+    sub eax, 8
+    mov ebx, r8d
+    sub ebx, r14d
+    inc ebx
+    mov rdx, rbx
+    imul rdx, rdx, 64
+    add rdx, rax
+    lea rax, [tb_binomial]
+    add r11, [rax + rdx*8]
+    inc r8d
+    jmp .p1_sum
+.p1_sum_done:
+    lea rax, [tb_factor]
+    mov rax, [rax + r14*8]
+    imul r11, rax
+    add r10, r11
+    mov r14d, r12d                ; i = t
+.pawns1_skip:
+
+    ; zvysne skupiny figur
+.tail_loop:
+    cmp r14d, r15d
+    jae .done
+    mov r12d, [tb_norm + r14*4]   ; t = norm[i]
+    cmp r12d, 0
+    jle .fail
+    mov eax, r14d
+    add eax, r12d                 ; i + t
+    mov r13d, eax
+    ; sort pos[i..i+t-1]
+    mov r8d, r14d
+.tail_sort_i:
+    mov eax, r8d
+    inc eax
+    cmp eax, r13d
+    jae .tail_sort_done
+    mov r9d, eax
+.tail_sort_j:
+    cmp r9d, r13d
+    jae .tail_sort_i_next
+    mov eax, [rsi + r8*4]
+    mov ebx, [rsi + r9*4]
+    cmp eax, ebx
+    jle .tail_sort_j_next
+    mov [rsi + r8*4], ebx
+    mov [rsi + r9*4], eax
+.tail_sort_j_next:
+    inc r9d
+    jmp .tail_sort_j
+.tail_sort_i_next:
+    inc r8d
+    jmp .tail_sort_i
+.tail_sort_done:
+    ; s = sum binomial[m-i+1][p - j]
+    xor r11, r11
+    mov r8d, r14d
+.tail_sum:
+    cmp r8d, r13d
+    jae .tail_sum_done
+    mov eax, [rsi + r8*4]
+    xor r9, r9
+    xor ecx, ecx                  ; count all previous pieces (0..m-1)
+.tail_count:
+    cmp ecx, r14d
+    jae .tail_have_count
+    mov ebx, [rsi + rcx*4]
+    cmp eax, ebx
+    jle .tail_count_next
+    inc r9d
+.tail_count_next:
+    inc ecx
+    jmp .tail_count
+.tail_have_count:
+    sub eax, r9d
+    mov ebx, r8d
+    sub ebx, r14d
+    inc ebx
+    mov rdx, rbx
+    imul rdx, rdx, 64
+    add rdx, rax
+    lea rax, [tb_binomial]
+    add r11, [rax + rdx*8]
+    inc r8d
+    jmp .tail_sum
+.tail_sum_done:
+    lea rax, [tb_factor]
+    mov rax, [rax + r14*8]
+    imul r11, rax
+    add r10, r11
+    mov r14d, r13d
+    jmp .tail_loop
+
+.done:
+    mov rdx, r10
+    mov eax, 1
+    jmp .return
+.fail:
+    xor eax, eax
+    xor edx, edx
+.return:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
 ; tb_pairs_decode_symbol_idx - decode raw symbol zo setup_pairs a idx
 ; Vstup: rdi = setup_pairs ptr, rsi = map_end, rdx = tb_size, rcx = idx
 ; Vystup: eax = 1 success / 0 fail, edx = raw symbol

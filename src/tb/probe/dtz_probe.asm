@@ -205,7 +205,22 @@ tb_probe_dtz:
     sete byte [tb_dtz_debug_helper_ok]
     xor byte [tb_dtz_debug_helper_ok], 1
     cmp eax, TB_NOT_FOUND
-    jne .done
+    je .dtz_3pc_fallback
+    cmp eax, DTZ_UNSUPPORTED
+    je .dtz_3pc_fallback
+    ; signed DTZ -> class (win=1, draw=0, loss=2), konzistentne s fallbackmi
+    test eax, eax
+    jg .dtz_3pc_win
+    jl .dtz_3pc_loss
+    xor eax, eax
+    jmp .done
+.dtz_3pc_win:
+    mov eax, 1
+    jmp .done
+.dtz_3pc_loss:
+    mov eax, 2
+    jmp .done
+.dtz_3pc_fallback:
 
     cmp r12d, TB_WIN
     je .dtz_win_fallback

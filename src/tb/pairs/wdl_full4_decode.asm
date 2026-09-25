@@ -90,6 +90,7 @@
     mov r9d, edx                  ; bside = !wtm = side
 
 .f4_orient_ready:
+    mov [tb_wdl_pairs_num_blocks], r9d
     ; order nibble pre zvoleny bside
     mov eax, r10d
     test r9d, r9d
@@ -266,6 +267,9 @@
     inc eax
     jmp .f4_collect_loop
 .f4_collect_done:
+    mov [tb_wdl_debug_wk], ecx
+    mov eax, [tb_tmp_pieces]
+    mov [tb_wdl_debug_bk], eax
 
     ; mapovanie podla pieces[bside] a cmirror
     lea r11, [tb_pieces]
@@ -280,16 +284,21 @@
     cmp eax, [tb_num]
     jae .f4_map_done
     movzx esi, byte [r11 + rax]
+
     xor esi, r8d                  ; target piece code
 
 .f4_find_j:
     cmp edx, ecx
-    jae .not_found
+    jae .f4_map_notfound
     mov edi, [tb_tmp_pieces + rdx*4]
     cmp edi, esi
     je .f4_found_j
     inc edx
     jmp .f4_find_j
+.f4_map_notfound:
+    add eax, 100
+    mov [tb_wdl_debug_extra], eax
+    jmp .not_found
 
 .f4_found_j:
     mov esi, [tb_tmp_gpos + rdx*4]
@@ -311,6 +320,12 @@
     jmp .f4_map_i_loop
 
 .f4_map_done:
+    mov eax, [tb_tmp_pos]
+    mov [tb_wdl_debug_wk], eax
+    mov eax, [tb_tmp_pos + 4]
+    mov [tb_wdl_debug_bk], eax
+    mov eax, [tb_tmp_pos + 8]
+    mov [tb_wdl_debug_extra], eax
     ; encode idx cez general helper
     lea rdi, [tb_norm]
     lea rdx, [tb_factor]

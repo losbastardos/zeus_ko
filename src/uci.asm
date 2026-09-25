@@ -80,6 +80,9 @@ uci_tbtest_wdl_bk: db " wdl_bk=", 0
 uci_tbtest_wdl_extra: db " wdl_extra=", 0
 uci_tbtest_wdl_order: db " wdl_order=", 0
 uci_tbtest_wdl_idx: db " wdl_idx=", 0
+uci_tbtest_wdl_tbsize: db " wdl_tb_size=", 0
+uci_tbtest_wdl_nf_code: db " wdl_nf_code=", 0
+uci_tbtest_wdl_p4_tbsize: db " wdl_p4_tb_size=", 0
 uci_tbtest_dtz_wk: db " dtz_wk=", 0
 uci_tbtest_dtz_bk: db " dtz_bk=", 0
 uci_tbtest_dtz_extra: db " dtz_extra=", 0
@@ -173,7 +176,7 @@ extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
-extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
+extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path, tb_tb_size
 extern bb_validate_position, bb_debug_mismatch
 extern book_pick_move, book_mode, book_search_depth
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
@@ -186,7 +189,7 @@ extern tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
 extern tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
 extern tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 extern tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
-extern tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
+extern tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte, tb_wdl_debug_nf_code, tb_wdl_debug_tb_size
 extern tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
 extern tb_dtz_debug_target_code
 extern tb_dtz_debug_order, tb_dtz_debug_order_byte
@@ -2418,6 +2421,26 @@ uci_loop:
     lea rdi, [uci_tbtest_wdl_idx]
     call write_cstr
     mov rax, [tb_wdl_debug_idx]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_idx]
+    call write_cstr
+    mov rax, [tb_wdl_debug_idx + 8]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_tbsize]
+    call write_cstr
+    mov rax, [tb_tb_size]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_nf_code]
+    call write_cstr
+    movzx rax, byte [tb_wdl_debug_nf_code]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_p4_tbsize]
+    call write_cstr
+    mov rax, [tb_wdl_debug_tb_size]
+    call print_number
+    lea rdi, [uci_tbtest_wdl_p4_tbsize]
+    call write_cstr
+    mov rax, [tb_wdl_debug_tb_size + 8]
     call print_number
     lea rdi, [uci_tbtest_dtz_payload]
     call write_cstr

@@ -430,3 +430,277 @@ tb_subfactor:
     pop rcx
     pop rbx
     ret
+
+; ============================================================
+; tb_setup_pieces_pawn - nastavenie pieces/norm/factor pre pawnful TB
+; Vstup: edi = file (0..3), esi = bside (0/1), edx = pawns0, ecx = pawns1
+; Vystup: eax = 1 success / 0 fail
+; Pozn.: naplni tb_pieces, tb_norm, tb_factor, tb_pawns0/1, tb_tb_size
+; ============================================================
+global tb_setup_pieces_pawn
+tb_setup_pieces_pawn:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov r12d, edi                 ; file
+    mov r13d, esi                 ; bside
+    mov [tb_pawns0], edx
+    mov [tb_pawns1], ecx
+
+    mov rax, [tb_map]
+    test rax, rax
+    jz .fail
+    lea r15, [rax + 5]            ; data start po flags byte
+
+    mov eax, [tb_num]
+    cmp eax, 2
+    jb .fail
+    cmp eax, 8
+    ja .fail
+    mov r14d, eax                 ; num
+
+    mov eax, 1
+    cmp ecx, 0
+    je .have_s
+    inc eax
+.have_s:
+    mov ebx, eax                  ; s = 1 + (pawns1 > 0)
+
+    ; offset do file recordu
+    mov eax, r14d
+    add eax, ebx
+    imul eax, r12d
+    add r15, rax                  ; r15 = data pre dany file
+
+    ; order/order2 z prveho/druheho bajtu podla bside
+    movzx eax, byte [r15]
+    test r13d, r13d
+    jz .order_low
+    shr eax, 4
+.order_low:
+    and eax, 0x0f
+    mov r11d, eax                 ; order
+
+    cmp dword [tb_pawns1], 0
+    je .no_order2
+    movzx eax, byte [r15 + 1]
+    test r13d, r13d
+    jz .order2_low
+    shr eax, 4
+.order2_low:
+    and eax, 0x0f
+    mov r10d, eax                 ; order2
+    jmp .order2_ready
+.no_order2:
+    mov r10d, 0x0f
+.order2_ready:
+
+    ; pieces bajty zacinaju za order bajtmi
+    mov eax, ebx
+    lea r9, [r15 + rax]           ; pieces data ptr
+
+    ; vycisti polia
+    lea rdi, [tb_pieces]
+    xor eax, eax
+    mov ecx, 16
+    rep stosb
+    lea rdi, [tb_norm]
+    mov ecx, 16
+    rep stosd
+    lea rdi, [tb_factor]
+    mov ecx, 16
+    rep stosq
+
+    ; kopiruj pieces pre zvoleny bside
+    xor ecx, ecx
+.copy_loop:
+    cmp ecx, r14d
+    jae .copied
+    movzx eax, byte [r9 + rcx]
+    test r13d, r13d
+    jz .pc_low
+    shr eax, 4
+    jmp .pc_store
+.pc_low:
+    and eax, 0x0f
+.pc_store:
+    mov [tb_pieces + rcx], al
+    inc ecx
+    jmp .copy_loop
+.copied:
+
+    ; nastav norm pre pawns
+    mov eax, [tb_pawns0]
+    mov [tb_norm], eax
+    cmp dword [tb_pawns1], 0
+    je .norm_tail
+    mov eax, [tb_pawns0]
+    mov ecx, [tb_pawns1]
+    mov [tb_norm + rax*4], ecx
+.norm_tail:
+    ; norm pre zvysne skupiny identickych figur
+    mov ecx, [tb_pawns0]
+    add ecx, [tb_pawns1]
+.norm_outer:
+    cmp ecx, r14d
+    jae .norm_done
+    mov r8d, ecx
+.norm_inner:
+    cmp r8d, r14d
+    jae .norm_inner_done
+    movzx eax, byte [tb_pieces + r8]
+    movzx edi, byte [tb_pieces + rcx]
+    cmp eax, edi
+    jne .norm_inner_done
+    inc dword [tb_norm + rcx*4]
+    inc r8d
+    jmp .norm_inner
+.norm_inner_done:
+    add ecx, [tb_norm + rcx*4]
+    jmp .norm_outer
+.norm_done:
+
+    ; vypocitaj factor
+    mov edi, r12d
+    mov esi, r11d
+    mov edx, r10d
+    call tb_calc_factors_pawn
+    mov [tb_tb_size], rax
+
+    mov eax, 1
+    jmp .done
+.fail:
+    xor eax, eax
+.done:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; tb_calc_factors_pawn - vypocet factor[] pre pawnful tabulku
+; Vstup: edi = file, esi = order, edx = order2
+; Pouziva: tb_norm, tb_num, tb_pawns0, tb_pawns1, tb_pfactor
+; Vystup: rax = tb_size, naplni tb_factor
+; ============================================================
+global tb_calc_factors_pawn
+tb_calc_factors_pawn:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    mov r15d, edi                 ; file
+    mov r14d, esi                 ; order
+    mov r13d, edx                 ; order2
+
+    mov eax, [tb_norm]
+    mov r12d, eax                 ; i = norm[0]
+    cmp r13d, 0x0f
+    je .no_order2
+    mov ecx, [tb_norm + r12*4]
+    add r12d, ecx
+.no_order2:
+    mov ebx, 64
+    sub ebx, r12d                 ; n = 64 - i
+
+    mov r11, 1                    ; f
+    xor r10d, r10d                ; k
+    mov eax, [tb_num]
+    mov r9d, eax                  ; num
+
+.loop:
+    cmp r12d, r9d
+    jl .body
+    cmp r10d, r14d
+    je .body
+    cmp r10d, r13d
+    jne .done_loop
+.body:
+    cmp r10d, r14d
+    jne .check_order2
+    ; k == order: factor[0] = f; f *= pfactor[norm[0]-1][file]
+    lea rax, [tb_factor]
+    mov [rax], r11
+    mov r8d, [tb_norm]
+    dec r8d
+    imul r8, r8, 32                ; kazdy riadok tb_pfactor ma 4 qwords
+    mov rax, r15
+    imul rax, rax, 8
+    add r8, rax
+    lea rax, [tb_pfactor]
+    mov rax, [rax + r8]
+    imul r11, rax
+    inc r10d
+    jmp .loop
+.check_order2:
+    cmp r10d, r13d
+    jne .regular_group
+    ; k == order2: factor[norm[0]] = f; f *= subfactor(norm[norm[0]], 48 - norm[0])
+    mov ecx, [tb_norm]
+    lea rax, [tb_factor]
+    mov [rax + rcx*8], r11
+    mov edi, [tb_norm + rcx*4]
+    mov esi, 48
+    sub esi, ecx
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    call tb_subfactor
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    imul r11, rax
+    inc r10d
+    jmp .loop
+.regular_group:
+    ; factor[i] = f
+    lea rax, [tb_factor]
+    mov [rax + r12*8], r11
+    ; f *= subfactor(norm[i], n)
+    mov edi, [tb_norm + r12*4]
+    mov esi, ebx
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    call tb_subfactor
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    imul r11, rax
+    mov ecx, [tb_norm + r12*4]
+    sub ebx, ecx
+    add r12d, ecx
+    inc r10d
+    jmp .loop
+.done_loop:
+    mov rax, r11
+.done:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
