@@ -54,6 +54,7 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.asm $(SRCDIR)/chess.inc $(SRCDIR)/eval_tune.inc $(SRC
 $(OBJDIR)/tb.o: $(SRCDIR)/tb/core_io.asm $(SRCDIR)/tb/pairs_decode.asm $(SRCDIR)/tb/probe_api.asm \
 	$(SRCDIR)/tb/pairs/helpers.asm $(SRCDIR)/tb/pairs/index_encode.asm \
 	$(SRCDIR)/tb/pairs/symbol_decode.asm $(SRCDIR)/tb/pairs/wdl_try.asm \
+		$(SRCDIR)/tb/pairs/pawnidx.inc \
 	$(SRCDIR)/tb/probe/path_helpers.asm $(SRCDIR)/tb/probe/init_load.asm \
 	$(SRCDIR)/tb/probe/wdl_probe.asm $(SRCDIR)/tb/probe/dtz_probe.asm $(SRCDIR)/tb/probe/piece_count.asm
 

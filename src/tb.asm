@@ -65,6 +65,8 @@ tb_wdl_debug_extra: resd 1        ; debug: extra square pre WDL encode (alebo -1
 tb_wdl_debug_order: resd 1        ; debug: order nibble pre WDL encode
 tb_wdl_debug_idx: resq 1          ; debug: encoded index pre WDL decode
 tb_wdl_debug_order_byte: resb 1   ; debug: raw order metadata byte pre WDL
+tb_wdl_debug_nf_code: resb 1      ; debug: stage pri WDL decode fail v pawn4_table
+tb_wdl_debug_tb_size: resq 1      ; debug: tb_size po tb_setup_pieces_pawn v pawn4_table
 tb_dtz_debug_wk: resd 1           ; debug: WK square pre DTZ encode (alebo -1)
 tb_dtz_debug_bk: resd 1           ; debug: BK square pre DTZ encode (alebo -1)
 tb_dtz_debug_extra: resd 1        ; debug: extra square pre DTZ encode (alebo -1)
@@ -137,6 +139,8 @@ tb_pieces: resb 16             ; pieces[2][8] (bez farebnych bitov)
 tb_norm: resd 16               ; norm[2][8]
 tb_factor: resq 16             ; factor[2][8]
 tb_tb_size: resq 2             ; tb_size[2]
+tb_pawns0: resd 1              ; pocet pescov v prvej pawns skupine
+tb_pawns1: resd 1              ; pocet pescov v druhej pawns skupine
 tb_tmp_pieces: resd 16         ; tmp pieces[] pre board->pos mapovanie
 tb_tmp_gpos: resd 16           ; tmp gpos[] pre board->pos mapovanie
 tb_tmp_pos: resd 16            ; tmp pos[] v poradi pieces[bside]
@@ -212,6 +216,17 @@ tb_piece_key:
     dq 0x680b000000010000
     dq 0x0000000000000000
     dq 0x0000000000000000
+    dq 0x0000000000000000
+    dq 0xf209000000100000
+    dq 0xbb14000001000000
+    dq 0x58df000010000000
+    dq 0xa15f000100000000
+    dq 0x7c94001000000000
+    dq 0x0000000000000000
+    dq 0x0000000000000000
+    dq 0x0000000000000000
+
+tb_piece_key_end:
 
 tb_PP_idx:
     dw 0,-1,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,-1,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61
@@ -255,6 +270,8 @@ tb_KK_idx:
     dw 452,391,392,393,394,395,396,397,-1,-1,-1,-1,398,399,400,401,-1,-1,-1,-1,402,403,404,405,-1,-1,-1,-1,406,407,408,409,-1,-1,-1,-1,453,410,411,412,-1,-1,-1,-1,-1,454,413,414,-1,-1,-1,-1,-1,-1,455,415,-1,-1,-1,-1,-1,-1,-1,456
     dw 457,416,417,418,419,420,421,422,-1,458,423,424,425,426,427,428,-1,-1,-1,-1,-1,429,430,431,-1,-1,-1,-1,-1,432,433,434,-1,-1,-1,-1,-1,435,436,437,-1,-1,-1,-1,-1,459,438,439,-1,-1,-1,-1,-1,-1,460,440,-1,-1,-1,-1,-1,-1,-1,461
 
+%include "tb/pairs/pawnidx.inc"
+
 section .text
 
 global tb_init, tb_probe_wdl, tb_probe_dtz, tb_piece_count
@@ -269,7 +286,7 @@ global tb_wdl_pairs_blocksize, tb_dtz_pairs_blocksize
 global tb_wdl_pairs_idxbits, tb_dtz_pairs_idxbits
 global tb_wdl_pairs_is_const, tb_dtz_pairs_is_const
 global tb_wdl_debug_wk, tb_wdl_debug_bk, tb_wdl_debug_extra
-global tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte
+global tb_wdl_debug_order, tb_wdl_debug_idx, tb_wdl_debug_order_byte, tb_wdl_debug_nf_code, tb_wdl_debug_tb_size
 global tb_dtz_debug_wk, tb_dtz_debug_bk, tb_dtz_debug_extra
 global tb_dtz_debug_target_code
 global tb_dtz_debug_order, tb_dtz_debug_order_byte
@@ -288,7 +305,7 @@ global tb_dec_trace_nsteps, tb_dec_trace_steps
 global tb_dec_stage_tmp
 global tb_num
 global tb_nonking
-global tb_enc_type, tb_pieces, tb_norm, tb_factor, tb_tb_size
+global tb_enc_type, tb_pieces, tb_norm, tb_factor, tb_tb_size, tb_pawns0, tb_pawns1
 
 extern board, side, halfmove
 extern generate_all_moves, is_in_check, move_count

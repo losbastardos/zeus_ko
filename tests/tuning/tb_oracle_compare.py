@@ -40,6 +40,13 @@ CASES = [
     Case("kbbvk_black", "8/8/8/8/8/8/4k1bb/K7 b - - 0 1"),
     Case("kbnvk_white", "8/8/8/8/8/8/4K1BN/k7 w - - 0 1"),
     Case("kbnvk_black", "8/8/8/8/8/8/4k1bn/K7 b - - 0 1"),
+    # 4-piece pawnful
+    Case("kbpvk_white", "8/8/8/8/8/7P/4K3/k6B w - - 0 1"),
+    Case("knpvk_white", "8/8/8/8/8/7P/4K3/k6N w - - 0 1"),
+    Case("kppvk_white", "8/8/8/8/8/6PP/4K3/k7 w - - 0 1"),
+    Case("kqpvk_white", "8/8/8/8/8/7P/4K2Q/k7 w - - 0 1"),
+    Case("krpvk_white", "8/8/8/8/8/7P/4K2R/k7 w - - 0 1"),
+    Case("kbvkp_black", "8/8/8/8/8/6p1/4K3/k6B w - - 0 1"),
 ]
 
 
@@ -54,15 +61,16 @@ def load_cases(path: Path) -> list[Case]:
         # Supported forms:
         # 1) name|fen
         # 2) fen
+        # 3) fen;wdl;dtz
         if "|" in line:
             name_part, fen_part = line.split("|", 1)
             name = name_part.strip()
             fen = fen_part.strip()
-            if not name or not fen:
-                raise ValueError(f"invalid case line {line_no}: expected 'name|fen'")
         else:
             name = f"case_{line_no}"
-            fen = line
+            fen = line.split(";")[0].strip()
+        if not fen:
+            raise ValueError(f"invalid case line {line_no}: missing fen")
 
         cases.append(Case(name=name, fen=fen))
 

@@ -21,10 +21,17 @@ tb_try_constant_wdl:
 
     ; Pawnless vetva (bez pesiakov): povodny decode tok, rozsireny
     ; o bezpecny non-constant idxbits==0 slice.
-    cmp r13d, PAWN
+    ; detekcia pesiaka v lubovolnom z ne-kralovskych figurok
+    xor eax, eax
+.pawn_detect_loop:
+    cmp eax, 16
+    jae .pawn_detect_done
+    movzx ecx, byte [tb_board_pieces + rax]
+    cmp ecx, PAWN
     je .pawn_table
-    cmp r14d, PAWN
-    je .pawn_table
+    inc eax
+    jmp .pawn_detect_loop
+.pawn_detect_done:
 
     cmp dword [tb_num], 4
     je .full4_decode
@@ -61,13 +68,41 @@ tb_try_constant_wdl:
     cmp rdi, rsi
     jae .not_found
 
-    ; bside aproximacia pre nesymetricke tabulky
+    ; bside vyber podla key-match vetvy (ako probe.c):
+    ;   board_key == pieces[0]_key -> bside = side   (!wtm vetva)
+    ;   inak                        -> bside = !side  (wtm vetva, cmirror=8;
+    ;                                   idx je geometricky, cmirror netreba)
+    lea r8, [tb_piece_key]
+    lea rdx, [board]
+    xor r9d, r9d                  ; board key
+    xor eax, eax
+.fd_board_key_loop:
+    cmp eax, 64
+    jae .fd_board_key_done
+    movzx ecx, byte [rdx + rax]
+    test ecx, ecx
+    jz .fd_board_key_next
+    add r9, [r8 + rcx*8]
+.fd_board_key_next:
+    inc eax
+    jmp .fd_board_key_loop
+.fd_board_key_done:
+    xor r11d, r11d                ; pieces[0] key
+    xor eax, eax
+.fd_ptr_key_loop:
+    cmp eax, [tb_num]
+    jae .fd_ptr_key_done
+    movzx ecx, byte [tb_pieces + rax]
+    add r11, [r8 + rcx*8]
+    inc eax
+    jmp .fd_ptr_key_loop
+.fd_ptr_key_done:
     movzx eax, byte [side]
-    mov r11d, eax
-    test ebx, ebx
-    jnz .fd_have_bside
-    xor r11d, r11d
+    cmp r9, r11
+    je .fd_have_bside             ; key match: bside = side
+    xor eax, 1                    ; key mismatch: bside = !side
 .fd_have_bside:
+    mov r11d, eax
 
     ; order nibble pre zvoleny bside (iba 0/1 pre enc_type=2,num=3)
     mov eax, r10d
@@ -266,7 +301,14 @@ tb_try_constant_wdl:
     jmp .raw_to_class
 
 .pawn_table:
+    ; pocet figurok: 3-piece (KPvK/KvPK) alebo 4-piece pawnful
+    cmp dword [tb_num], 3
+    je .pawn3_table
+    cmp dword [tb_num], 4
+    je .pawn4_table
     jmp .not_found
+
+.pawn3_table:
     mov byte [tb_wdl_pairs_is_const], 4
     ; 3-piece pawn scope: KPvK/KvPK. Vyberieme setup_pairs slot
     ; rovnako ako probe.c (file bucket + bside), ale realny variable-bit
@@ -526,6 +568,326 @@ tb_try_constant_wdl:
     mov rdi, r8
     inc ecx
     jmp .pawn_parse_loop
+
+.pawn4_table:
+    ; 4-piece pawnful: podpora 1 pesiak + 1 figura + 2 krali
+    ; (KBPvK, KNPvK, KQPvK, KRPvK, KBvKP, KNvKP, KQvKP, KRvKP)
+    ; Pre KPPvK/KPvKP zatial fallback.
+
+    ; spocitaj bielych a ciernych pesiakov
+    lea rax, [board]
+    xor r8d, r8d                  ; white pawns
+    xor r9d, r9d                  ; black pawns
+    xor ecx, ecx
+.count_pawns:
+    cmp ecx, 64
+    jae .count_done
+    movzx edx, byte [rax + rcx]
+    test edx, edx
+    jz .count_next
+    mov ebx, edx
+    and ebx, PIECE_MASK
+    cmp ebx, PAWN
+    jne .count_next
+    test edx, COLOR_MASK
+    jnz .count_black
+    inc r8d
+    jmp .count_next
+.count_black:
+    inc r9d
+.count_next:
+    inc ecx
+    jmp .count_pawns
+.count_done:
+    mov r10d, r8d                 ; bielych pesiacov
+    mov r11d, r9d                 ; ciernych pesiacov
+    lea r8, [board]               ; board pointer pre dalsi scan
+    lea r9, [r12 + 6]             ; pieces data file0 (ptr_key)
+
+    ; Syzygy pawns[0]/pawns[1] swap pravidlo
+    test r11d, r11d
+    jz .pawns_ready
+    test r10d, r10d
+    jz .do_swap
+    cmp r11d, r10d
+    jae .pawns_ready
+.do_swap:
+    mov eax, r10d
+    mov r10d, r11d
+    mov r11d, eax
+.pawns_ready:
+    cmp r11d, 1
+    ja .not_found
+    cmp r10d, 1
+    je .p4_pawn_count_ok
+    cmp r10d, 2
+    jne .not_found
+    test r11d, r11d
+    jnz .not_found
+.p4_pawn_count_ok:
+    mov [tb_pawns0], r10d         ; uloz pawns0/pawns1 pre setup
+    mov [tb_pawns1], r11d
+
+    ; nacitaj pieces[0] z file=0, bside=0 pre key match a lead pawn
+    mov r12, [tb_map]
+    lea rsi, [r12 + 5]            ; data start
+    ; s = 1 + (pawns1 > 0); record size = num + s
+    mov ebx, 1
+    cmp dword [tb_pawns1], 0
+    je .p4_have_s_key
+    inc ebx
+.p4_have_s_key:
+    mov eax, [tb_num]
+    add eax, ebx
+    ; pieces bajty zacinaju za order bajtmi
+    lea r9, [rsi + rbx]           ; pieces data file0
+
+    ; ptr_key = sum tb_piece_key[pieces0[i]]
+    xor r11, r11                  ; ptr_key
+    xor ecx, ecx
+.ptr_key_loop:
+    cmp ecx, [tb_num]
+    jae .ptr_key_done
+    movzx eax, byte [r9 + rcx]
+    and eax, 0x0f                 ; bside 0 low nibble
+    lea rdx, [tb_piece_key]
+    add r11, [rdx + rax*8]
+    inc ecx
+    jmp .ptr_key_loop
+.ptr_key_done:
+
+    ; board_key = sum tb_piece_key[board[i]]
+    xor r10, r10                  ; board_key
+    xor ecx, ecx
+.board_key_loop:
+    cmp ecx, 64
+    jae .board_key_done
+    movzx edi, byte [r8 + rcx]
+    test edi, edi
+    jz .board_key_next
+    lea rdx, [tb_piece_key]
+    add r10, [rdx + rdi*8]
+.board_key_next:
+    inc ecx
+    jmp .board_key_loop
+.board_key_done:
+    mov [tb_wdl_debug_wk], r10d
+    mov [tb_wdl_debug_bk], r11d
+
+    ; cmirror/mirror/bside podla key match (ako pawn3_table)
+    mov byte [tb_dec_cmirror_tmp], 0
+    mov byte [tb_dec_mirror_tmp], 0
+    movzx edx, byte [side]
+    cmp r10, r11
+    je .p4_side_ready
+    mov byte [tb_dec_cmirror_tmp], 8
+    mov byte [tb_dec_mirror_tmp], 56
+    xor edx, 1
+.p4_side_ready:
+    mov [tb_dec_bside_tmp], dl
+    mov [tb_wdl_pairs_blocksize], dl
+
+    ; najdi lead pawn square (pieces0[0] ^ cmirror)
+    movzx eax, byte [r9]
+    and eax, 0x0f
+    movzx ebx, byte [tb_dec_cmirror_tmp]
+    xor eax, ebx
+    mov r13d, eax                 ; expected lead pawn code
+    mov r14d, -1                  ; best lead pawn sq
+    mov r10d, 255                 ; best flap
+    xor ecx, ecx
+.p4_find_pawn:
+    cmp ecx, 64
+    jae .p4_pawn_done
+    movzx edx, byte [r8 + rcx]
+    cmp edx, r13d
+    jne .p4_find_pawn_next
+    mov eax, ecx
+    movzx ebx, byte [tb_dec_mirror_tmp]
+    xor eax, ebx
+    lea rdx, [tb_flap]
+    movzx eax, byte [rdx + rax]
+    cmp eax, r10d
+    jae .p4_find_pawn_next
+    mov r10d, eax                 ; najlepsi flap
+    mov r14d, ecx                 ; najlepsi sq
+.p4_find_pawn_next:
+    inc ecx
+    jmp .p4_find_pawn
+.p4_pawn_done:
+    cmp r14d, 0
+    jl .not_found
+    movzx eax, byte [tb_dec_mirror_tmp]
+    xor r14d, eax                 ; lead pawn sq po mirror
+
+    ; file bucket z lead pawn
+    mov eax, r14d
+    and eax, 7
+    lea rdx, [tb_file_to_file]
+    movzx eax, byte [rdx + rax]
+    mov r15d, eax                 ; file bucket
+
+    ; setup pieces/norm/factor pre dany file a bside
+    push r8                       ; uloz board pointer (tb_setup_pieces_pawn moze pouzit r8)
+    movzx r11d, byte [tb_dec_bside_tmp]
+    mov edi, r15d
+    mov esi, r11d
+    mov edx, [tb_pawns0]
+    mov ecx, [tb_pawns1]
+    call tb_setup_pieces_pawn
+    pop r8
+    test eax, eax
+    jz .not_found
+    mov rax, [tb_tb_size]
+    mov [tb_wdl_debug_tb_size], rax
+
+    ; zostav tb_tmp_pos[0..num-1]
+    lea rdi, [tb_tmp_pos]
+    mov [rdi], r14d               ; pos[0] = lead pawn
+    mov r13d, [tb_num]
+    mov ecx, 1
+.p4_build_pos:
+    cmp ecx, r13d
+    jae .p4_pos_done
+    movzx eax, byte [tb_pieces + rcx]
+    movzx ebx, byte [tb_dec_cmirror_tmp]
+    xor eax, ebx                  ; expected board code
+    xor edx, edx
+.p4_find_piece:
+    cmp edx, 64
+    jae .not_found
+    movzx edi, byte [r8 + rdx]
+    cmp edi, eax
+    jne .p4_find_next
+    ; preskoc uz pouzite policko (duplicitne figury)
+    mov r10d, edx
+    movzx esi, byte [tb_dec_mirror_tmp]
+    xor r10d, esi                 ; normalizovane policko kandidat
+    xor r9d, r9d
+.p4_used_check:
+    cmp r9d, ecx
+    jae .p4_piece_found
+    cmp r10d, [tb_tmp_pos + r9*4]
+    je .p4_find_next
+    inc r9d
+    jmp .p4_used_check
+.p4_piece_found:
+    movzx ebx, byte [tb_dec_mirror_tmp]
+    xor edx, ebx
+    mov [tb_tmp_pos + rcx*4], edx
+    inc ecx
+    jmp .p4_build_pos
+.p4_find_next:
+    inc edx
+    jmp .p4_find_piece
+.p4_pos_done:
+
+    call tb_encode_pawn_idx
+    test eax, eax
+    jz .not_found
+    mov [tb_wdl_debug_idx], rdx
+    mov r14, rdx                  ; idx
+    mov r13d, r15d                ; file bucket
+    movzx r11d, byte [tb_dec_bside_tmp] ; bside
+
+    ; priprav setup_pairs slot pre file+bside
+    mov r12, [tb_map]
+    mov r15, [tb_map_size]
+    lea rsi, [r12 + r15]          ; map_end
+    lea rdi, [r12 + 5]            ; headers_start
+    ; record size = num + s, s = 1 + (pawns1 > 0), files = 4
+    mov ebx, 1
+    cmp dword [tb_pawns1], 0
+    je .p4_have_s
+    inc ebx
+.p4_have_s:
+    mov eax, [tb_num]
+    add eax, ebx
+    shl eax, 2                    ; skip all 4 file records
+    add rdi, rax                  ; setup_pairs start
+    ; (alignment pre pawnful 4-piece je parita, pre istotu zarovnaj)
+    mov rax, rdi
+    sub rax, r12
+    test al, 1
+    jz .p4_aligned
+    inc rdi
+.p4_aligned:
+
+    mov [tb_dec_headers_start_tmp], rdi
+    mov rax, rdi
+    sub rax, r12
+    mov [tb_wdl_debug_order_byte], al
+
+    ; slot_count = 4 files * (1 + split)
+    movzx eax, byte [r12 + 4]
+    and eax, 1
+    mov ebx, 4
+    test eax, eax
+    jz .p4_slots_no_split
+    shl ebx, 1
+.p4_slots_no_split:
+    mov [tb_dec_slot_count_tmp], ebx
+
+    ; target index: file (non-split) alebo file*2 + bside (split)
+    cmp ebx, 4
+    je .p4_target_nosplit
+    mov eax, r13d
+    shl eax, 1
+    test r11d, r11d
+    jz .p4_target_ready
+    inc eax
+    jmp .p4_target_ready
+.p4_target_nosplit:
+    mov eax, r13d
+.p4_target_ready:
+    mov [tb_dec_target_tmp], eax
+    mov [tb_wdl_pairs_num_blocks], eax
+
+    ; parse slots az po target
+    xor ecx, ecx
+.p4_parse_loop:
+    cmp ecx, ebx
+    jae .not_found
+    mov r14, rdi                  ; save header ptr (tb_parse_pairs_minlen meni r9)
+    push rcx
+    call tb_parse_pairs_minlen
+    pop rcx
+    test eax, eax
+    jz .not_found
+    cmp ecx, [tb_dec_target_tmp]
+    je .p4_target_slot
+    mov rdi, r8                   ; next ptr
+    inc ecx
+    jmp .p4_parse_loop
+.p4_target_slot:
+    mov rbx, r14                  ; target setup_pairs ptr
+    mov [tb_wdl_pairs_num_syms], ecx
+    mov rax, rbx
+    sub rax, r12
+    mov [tb_wdl_pairs_header_off], rax
+
+    mov rdi, [tb_dec_headers_start_tmp]
+    lea rsi, [r12 + r15]
+    mov edx, [tb_dec_slot_count_tmp]
+    mov ecx, [tb_dec_target_tmp]
+    mov r8, [tb_tb_size]
+    call tb_pairs_prepare_pawn_override
+    test eax, eax
+    jz .not_found
+
+    mov rcx, [tb_wdl_debug_idx]
+    mov rdi, rbx
+    lea rsi, [r12 + r15]
+    mov rdx, [tb_tb_size]
+    call tb_pairs_decode_symbol_idx
+    test eax, eax
+    jnz .p4_decode_ok
+    movzx eax, byte [tb_dec_stage_tmp]
+    mov [tb_wdl_debug_nf_code], al
+    jmp .not_found
+.p4_decode_ok:
+    mov r10d, edx
+    jmp .raw_to_class
 
 .raw_to_class:
     ; raw syzygy symbol -> WDL trieda: raw-2  {-2..2}
