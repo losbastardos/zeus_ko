@@ -76,6 +76,7 @@ section .text
 
 global make_move, unmake_move, quiescence, negamax, search_best_move, perft
 global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
+global smp_worker_mode, smp_child_pids
 
 extern board, side, castle, enpassant, halfmove, fullmove
 extern moved_piece, captured_piece

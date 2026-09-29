@@ -15,9 +15,16 @@ DEFAULT REL
 %define SMP_STOP_OK     0
 %define PROT_RW         3        ; PROT_READ|PROT_WRITE
 %define MAP_SH_ANON     0x21     ; MAP_SHARED|MAP_ANONYMOUS
+%define MAP_ANON        32       ; MAP_ANONYMOUS (privátny)
+%define SIGCHLD         17
+
+%define SMP_MAX_WORKERS 7
+%define SMP_STACK_SIZE  (8*1024*1024)
 
 section .bss
 smp_status: resd 1
+smp_timespec: resq 2
+smp_stack_tops: resq SMP_MAX_WORKERS   ; topy mmap stackov (parent ich nepoužíva)
 
 section .text
 
@@ -26,6 +33,7 @@ global smp_spawn_helpers, smp_stop_and_reap, smp_worker_main
 extern smp_shared, smp_child_count
 extern uci_threads, uci_stop_flag
 extern search_best_move, search_last_score, nodes_searched, asp_use
+extern smp_worker_mode, smp_child_pids, search_limits
 
 ; ============================================================
 ; smp_init - vytvor (alebo zrecykluj) MAP_SHARED stranku
@@ -89,9 +97,133 @@ smp_signal_stop:
     ret
 
 ; ============================================================
-; Docasne stuby - naplni ich Task 2 (spawn/worker logika)
+; smp_spawn_helpers - spusti (uci_threads - 1) helper procesov
+; Vstup: nic (berie [uci_threads]); pozicia + search_limits su finalne.
+; Helperi zdedia COW kopiu celeho stavu (board, undo, limity).
 ; ============================================================
 smp_spawn_helpers:
-smp_stop_and_reap:
+    push rbx
+    push r12
+    mov r12d, 1                  ; worker index 1..uci_threads-1
+.loop:
+    mov eax, [uci_threads]
+    cmp r12d, eax
+    jge .done
+    cmp r12d, 8
+    jge .done
+    ; vlastny stack pre helper (COW kopiu dostane child)
+    mov rax, SYS_MMAP
+    xor rdi, rdi
+    mov rsi, SMP_STACK_SIZE
+    mov rdx, PROT_RW
+    mov r10, MAP_ANON            ; 0x20, privatny
+    mov r8, -1
+    xor r9, r9
+    syscall
+    cmp rax, -4096
+    ja .done                     ; mmap zlyhal: pokracujeme s menej helpermi
+    lea rbx, [rax + SMP_STACK_SIZE]  ; top stacku
+    mov [smp_stack_tops + r12*8 - 8], rbx
+    ; clone(SIGCHLD) bez CLONE_VM = lightweight proces
+    mov rax, SYS_CLONE
+    mov rdi, SIGCHLD
+    mov rsi, rbx                 ; child stack top
+    xor rdx, rdx
+    xor r10, r10
+    xor r8, r8
+    syscall
+    test rax, rax
+    js .done                     ; clone zlyhal: menej helperov
+    jz .child
+    ; parent: uloz pid
+    mov [smp_child_pids + r12*8], rax
+    inc dword [smp_child_count]
+    inc r12d
+    jmp .loop
+.child:
+    ; child: register state je zdedeny (rax=0), worker index je v r12
+    mov rdi, r12
+    jmp smp_worker_main          ; worker nikdy nevracia
+.done:
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; smp_worker_main - vstup helpera (vlastny BSS, vlastny stack)
+; rdi = worker index. Hra full-root ID slucku, plni zdielanu TT.
+; Kontroluje len shared stop + vlastny hard limit (stdin NEPOLLUJ).
+; ============================================================
 smp_worker_main:
+    push rbx
+    push r12
+    push r13
+    sub rsp, 8                   ; alignment: vstup rsp=0 (jmp bez retaddr), po 3 push ≡8; call vyzaduje ≡0
+    mov rbx, rdi                 ; worker index (pre pripadnu diagnostiku)
+    mov dword [smp_worker_mode], 1   ; zabrani rekurzivnemu SMP dispatch
+    mov r12, 1                   ; depth
+.id_loop:
+    call smp_check_stop
+    test eax, eax
+    jnz .done
+    ; hard time limit (vlastna kopia search_limits)
+    movzx eax, byte [search_limits + 0]
+    cmp eax, 3                   ; infinite
+    je .no_limit
+    cmp eax, 4                   ; ponder
+    je .no_limit
+    mov rax, [search_limits + 64]    ; hard_limit ms
+    test rax, rax
+    jz .no_limit
+    mov rax, SYS_CLOCK_GETTIME
+    mov rdi, CLOCK_MONOTONIC
+    lea rsi, [smp_timespec]
+    syscall
+    test rax, rax
+    js .no_limit
+    mov rax, [smp_timespec]
+    imul rax, 1000
+    mov r13, rax
+    mov rax, [smp_timespec + 8]
+    mov rcx, 1000000
+    xor rdx, rdx
+    div rcx
+    add rax, r13
+    sub rax, [search_limits + 48]    ; elapsed ms
+    cmp rax, [search_limits + 64]
+    jge .done
+.no_limit:
+    mov dword [asp_use], 0           ; helper bez aspiration window
+    mov qword [nodes_searched], 0
+    mov rdi, r12
+    call search_best_move
+    inc r12
+    cmp r12, 64
+    jle .id_loop
+.done:
+    mov eax, SYS_EXIT
+    xor edi, edi
+    syscall
+
+; ============================================================
+; smp_stop_and_reap - signalizuj stop a pockaj na vsetkych helperov
+; ============================================================
+smp_stop_and_reap:
+    push rbx
+    call smp_signal_stop
+.reap_loop:
+    cmp dword [smp_child_count], 0
+    jle .done
+    mov rax, SYS_WAIT4
+    mov rdi, -1                  ; lubovolne dieta
+    lea rsi, [smp_status]
+    xor edx, edx
+    xor r10d, r10d
+    syscall
+    test rax, rax
+    js .done                     ; chyba (zombie uz nie su) - koncime
+    dec dword [smp_child_count]
+    jmp .reap_loop
+.done:
+    pop rbx
     ret
