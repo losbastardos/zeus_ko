@@ -19,6 +19,7 @@ extern board, side, castle, enpassant, halfmove, fullmove
 extern piece_chars
 extern compute_hash, init_hash_history, record_hash
 extern parse_int
+extern inc_eval_valid
 
 ; ============================================================
 ; fen_piece_char_to_byte - prevedie znak FEN figúrky na bajt
@@ -294,6 +295,7 @@ parse_fen_string:
     call compute_hash
     call init_hash_history
     call record_hash
+    mov byte [inc_eval_valid], 0   ; invalidacia inkrementalneho eval cache
 
     xor rax, rax
     jmp .done

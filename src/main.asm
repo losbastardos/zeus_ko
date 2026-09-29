@@ -175,6 +175,7 @@ extern init_board, print_title, print_board, print_prompt, print_newline
 extern read_move, print_move_list
 extern generate_all_moves, parse_user_move, find_move, apply_move
 extern update_position_state
+extern inc_eval_valid
 extern toggle_board_view
 extern is_in_check
 extern search_best_move, print_move
@@ -1215,6 +1216,7 @@ _start:
     call apply_move
     pop rax
     call update_position_state
+    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call record_move
     call compute_hash
     call record_hash
@@ -1251,6 +1253,7 @@ _start:
     pop rax
     call apply_move
     call update_position_state
+    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call record_move
     call compute_hash
     call record_hash
