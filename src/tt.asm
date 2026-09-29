@@ -16,7 +16,7 @@ DEFAULT REL
 
 %define PROT_READ   1
 %define PROT_WRITE  2
-%define MAP_PRIVATE 2
+%define MAP_SHARED  1
 %define MAP_ANON    32
 
 section .bss
@@ -74,7 +74,7 @@ tt_init:
     xor rdi, rdi                ; addr = NULL
     mov rsi, rbx                ; len
     mov rdx, PROT_READ | PROT_WRITE
-    mov r10, MAP_PRIVATE | MAP_ANON
+    mov r10, MAP_SHARED | MAP_ANON
     mov r8, -1
     xor r9, r9
     syscall
@@ -138,6 +138,9 @@ tt_clear:
 ;         eax=score (ak status=1), r8w=move (ak hit)
 ; ============================================================
 tt_probe:
+    ; INVARIANT: citame hash az po payload (move/score/flag) kvoli lock-free
+    ; store protokolu v tt_store (payload -> mfence -> hash). Otocenie poradia
+    ; citania rozbije synchronizaciu a nesmie sa urobit.
     push rbx
     push r9
     push r10
@@ -228,11 +231,15 @@ tt_store:
     ja .done
 
 .do_store:
-    mov [r11], rdi
+    ; lock-free: payload (8B) najprv, mfence, potom hash (8B).
+    ; x86 garantuje atomicitu aligned 8B zapisov; tt_probe cita hash az
+    ; po payloade, takze torn read da len validny (starsi) zaznam.
     mov [r11 + 8], r8w
     mov byte [r11 + 10], sil
     mov byte [r11 + 11], cl
     mov dword [r11 + 12], edx
+    mfence
+    mov [r11], rdi
 
 .done:
     pop r11

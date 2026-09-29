@@ -10,7 +10,12 @@
 ; Systemove konstanty
 SYS_READ    equ 0
 SYS_WRITE   equ 1
+SYS_PIPE    equ 22
+SYS_CLONE   equ 56
+SYS_FORK    equ 57
+SYS_WAIT4   equ 61
 SYS_POLL    equ 7
+SYS_FUTEX   equ 202
 SYS_CLOCK_GETTIME equ 228
 SYS_EXIT    equ 60
 SYS_OPEN    equ 2

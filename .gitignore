@@ -39,6 +39,7 @@ AGENTS.md
 .vscode/
 SESSION_LOG.md
 scratch/
+arasan-linux-binaries-26.0/
 
 # utils: trackujeme len workflow skripty referencované z Makefile;
 # ostatné (deploy s lokálnymi cestami, PGN databázy, book generátory) ostávajú súkromné

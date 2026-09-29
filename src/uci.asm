@@ -14,7 +14,7 @@ DEFAULT REL
 section .data
 
 global uci_id_name, uci_id_author, uci_ok, uci_ready, uci_bestmove, uci_unknown
-global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead, uci_opt_evalmode
+global uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead, uci_opt_evalmode, uci_opt_threads
 
 %defstr BUILD_DATE_STR BUILD_DATE
 
@@ -37,6 +37,7 @@ uci_opt_syzygy:  db "option name SyzygyPath type string default <empty>", 10, 0
 uci_opt_syzygy_depth: db "option name SyzygyProbeDepth type spin default 1 min 0 max 64", 10, 0
 uci_opt_overhead: db "option name MoveOverhead type spin default 100 min 0 max 10000", 10, 0
 uci_opt_evalmode: db "option name EvalMode type spin default 2 min 0 max 2", 10, 0
+uci_opt_threads: db "option name Threads type spin default 1 min 1 max 8", 10, 0
 
 uci_ready:
     db "readyok", 10, 0
@@ -129,6 +130,16 @@ uci_log_bm_prefix: db "<< bestmove "
 uci_log_bm_prefix_len equ $ - uci_log_bm_prefix
 uci_log_bm_null:   db "<< bestmove 0000", 10
 uci_log_bm_null_len equ $ - uci_log_bm_null
+uci_log_src_prefix: db "<< source "
+uci_log_src_prefix_len equ $ - uci_log_src_prefix
+uci_src_book_str:  db "book"
+uci_src_book_len   equ $ - uci_src_book_str
+uci_src_search_str: db "search"
+uci_src_search_len  equ $ - uci_src_search_str
+uci_info_src_book:  db "info string move_source=book", 10
+uci_info_src_book_len equ $ - uci_info_src_book
+uci_info_src_search: db "info string move_source=search", 10
+uci_info_src_search_len equ $ - uci_info_src_search
 uci_str_0000:      db "0000"
 uci_log_bad_bm:    db "!! WARNING: bestmove nie je legalny tah - fallback na prvy legalny", 10
 uci_log_bad_bm_len equ $ - uci_log_bad_bm
@@ -150,6 +161,7 @@ uci_pgn_idx:    resq 1    ; index ťahu v práve spracúvanom 'position ... move
 input_pollfd:   resd 2    ; pollfd: dd fd, dw events, dw revents
 uci_iter_start: resq 1    ; mode 2: start aktuálnej ID iterácie (ms)
 uci_iter_dur:   resq 1    ; mode 2: trvanie poslednej dokončenej iterácie (ms)
+uci_move_source: resb 1   ; 0=search, 1=book
 
 INPUT_PEND_SIZE equ 512
 
@@ -170,7 +182,9 @@ extern nnue_load
 extern nnue2_load
 extern key_nnue_file
 extern default_nnue_file
-extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
+extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
+extern smp_init, smp_clear_stop, smp_spawn_helpers, smp_stop_and_reap, smp_signal_stop
+extern smp_shared
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
@@ -828,6 +842,13 @@ uci_setoption:
     test rax, rax
     jnz .opt_evalmode
 
+    mov rdi, r13
+    mov rsi, r14
+    lea rdx, [rel .str_threads]
+    call uci_str_eq
+    test rax, rax
+    jnz .opt_threads
+
     jmp .done
 
 .opt_hash:
@@ -1029,6 +1050,21 @@ uci_setoption:
     mov byte [eval_mode], 0
     jmp .done
 
+.opt_threads:
+    mov rdi, r15
+    mov rsi, rbx
+    call uci_parse_int
+    cmp eax, 1
+    jge .threads_min_ok
+    mov eax, 1
+.threads_min_ok:
+    cmp eax, 8
+    jle .threads_store
+    mov eax, 8
+.threads_store:
+    mov [uci_threads], eax
+    jmp .done
+
 .done:
     pop r15
     pop r14
@@ -1044,6 +1080,7 @@ uci_setoption:
 .str_syzygyprobedepth: db "SyzygyProbeDepth", 0
 .str_moveoverhead: db "MoveOverhead", 0
 .str_evalmode: db "EvalMode", 0
+.str_threads: db "Threads", 0
 .str_true:     db "true", 0
 .str_false:    db "false", 0
 
@@ -1054,6 +1091,7 @@ uci_str_btime:      db "btime", 0
 uci_str_winc:       db "winc", 0
 uci_str_binc:       db "binc", 0
 uci_str_movestogo:  db "movestogo", 0
+uci_str_threads:    db "threads", 0
 uci_str_infinite:   db "infinite", 0
 uci_str_ponder_kw:  db "ponder", 0
 
@@ -1253,6 +1291,7 @@ search_poll_input:
 
 .cmd_stop:
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop      ; zastav aj helper procesy
     jmp .next_line
 
 .cmd_quit:
@@ -1265,6 +1304,7 @@ search_poll_input:
     jmp .next_line
 .quit_stop:
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop      ; zastav aj helper procesy
     jmp .next_line
 
 .next_line:
@@ -1514,6 +1554,8 @@ uci_go:
     mov qword [search_limits + 64], rax
     mov byte [uci_stop_flag], 0
     mov byte [uci_quit_flag], 0
+    call smp_init
+    call smp_clear_stop
 
     ; parsuj argumenty za 'go'
     mov rdi, 2
@@ -1575,6 +1617,13 @@ uci_go:
     call uci_str_eq
     test rax, rax
     jnz .parse_movestogo
+
+    mov rdi, r15
+    mov rsi, rbx
+    lea rdx, [rel uci_str_threads]
+    call uci_str_eq
+    test rax, rax
+    jnz .parse_threads
 
     mov rdi, r15
     mov rsi, rbx
@@ -1696,6 +1745,26 @@ uci_go:
     mov rdi, rcx
     jmp .go_loop
 
+.parse_threads:
+    mov rdi, r14
+    call uci_token
+    cmp rax, -1
+    je .after_parse
+    mov rdi, rax
+    mov rsi, rbx
+    call uci_parse_int
+    cmp rax, 1                   ; clamp: minimum 1 (threads 0 -> 1), parse pokracuje
+    jge .th_min_ok
+    mov rax, 1
+.th_min_ok:
+    cmp rax, 8
+    jle .th_store
+    mov rax, 8
+.th_store:
+    mov [uci_threads], eax
+    mov rdi, rcx
+    jmp .go_loop
+
 .set_infinite:
     mov byte [search_limits + 0], 3
     mov byte [search_limits + 1], 64
@@ -1735,23 +1804,36 @@ uci_go:
     mov [search_limits + 48], rax
 
 .search:
+    mov byte [uci_move_source], 0
     cmp byte [uci_own_book], 0
     je .no_book
     cmp byte [book_mode], 0
     jne .think_book
     call book_lookup
     test rax, rax
-    jnz .do_move
-    jmp .no_book
+    jz .no_book
+    mov byte [uci_move_source], 1
+    jmp .do_move
 .think_book:
     call book_pick_move
     test rax, rax
-    jnz .do_move
+    jz .no_book
+    mov byte [uci_move_source], 1
+    jmp .do_move
 .no_book:
     xor r13d, r13d            ; best_move
     xor r14d, r14d            ; best_depth
     mov r15, 1                ; current depth
     mov qword [uci_iter_dur], 0
+    cmp byte [uci_stop_flag], 0
+    jne .id_loop              ; stop hned: helperov nespustame
+    mov eax, [uci_threads]
+    cmp eax, 1
+    jle .id_loop
+    mov rax, [smp_shared]        ; spawn guard: bez shared stop-flag helperov nespustame
+    test rax, rax
+    jz .id_loop
+    call smp_spawn_helpers
 
 .id_loop:
     cmp byte [uci_stop_flag], 0
@@ -1864,6 +1946,7 @@ uci_go:
     jmp .id_loop
 
 .id_done:
+    call smp_stop_and_reap    ; bezpecne aj bez helperov (child_count=0 -> hned return)
     test r13, r13
     jnz .id_have_best
     mov rdi, 1
@@ -1883,6 +1966,37 @@ uci_go:
 
 .do_move:
     mov r12, rax
+
+    ; viditelna diagnostika: zdroj bestmove (book/search)
+    cmp byte [uci_move_source], 1
+    jne .src_search
+    lea rdi, [uci_info_src_book]
+    mov rdx, uci_info_src_book_len
+    call write_str
+    lea rdi, [uci_log_src_prefix]
+    mov esi, uci_log_src_prefix_len
+    call uci_log_str
+    lea rdi, [uci_src_book_str]
+    mov esi, uci_src_book_len
+    call uci_log_str
+    lea rdi, [msg_newline]
+    mov esi, 1
+    call uci_log_str
+    jmp .src_done
+.src_search:
+    lea rdi, [uci_info_src_search]
+    mov rdx, uci_info_src_search_len
+    call write_str
+    lea rdi, [uci_log_src_prefix]
+    mov esi, uci_log_src_prefix_len
+    call uci_log_str
+    lea rdi, [uci_src_search_str]
+    mov esi, uci_src_search_len
+    call uci_log_str
+    lea rdi, [msg_newline]
+    mov esi, 1
+    call uci_log_str
+.src_done:
 
     ; --- log "<< bestmove <tah>" (0000 ak nulty tah) ---
     test r12, r12
@@ -2282,6 +2396,8 @@ uci_loop:
     lea rdi, [uci_opt_overhead]
     call write_cstr
     lea rdi, [uci_opt_evalmode]
+    call write_cstr
+    lea rdi, [uci_opt_threads]
     call write_cstr
     lea rdi, [uci_ok]
     call write_cstr

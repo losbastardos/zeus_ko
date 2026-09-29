@@ -29,6 +29,7 @@ def build_cmd(args: argparse.Namespace) -> List[str]:
         f"cmd={args.new}",
         "proto=uci",
         f"option.Hash={args.hash_mb}",
+        f"option.Threads={args.new_threads}",
     ]
     if args.new_ownbook_option:
         cmd.append("option.OwnBook=false")
@@ -39,6 +40,7 @@ def build_cmd(args: argparse.Namespace) -> List[str]:
         f"cmd={args.base}",
         "proto=uci",
         f"option.Hash={args.hash_mb}",
+        f"option.Threads={args.base_threads}",
     ]
     if args.base_ownbook_option:
         cmd.append("option.OwnBook=false")
@@ -77,6 +79,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--concurrency", type=int, default=2, help="parallel game threads")
     parser.add_argument("--tc", default="10+0.1", help="time control for -each tc=")
     parser.add_argument("--hash-mb", type=int, default=64, help="Hash option for both engines")
+    parser.add_argument("--new-threads", type=int, default=1, help="Threads option for NEW engine")
+    parser.add_argument("--base-threads", type=int, default=1, help="Threads option for BASE engine")
     parser.add_argument(
         "--sprt",
         default="elo0=0 elo1=8 alpha=0.05 beta=0.05",
@@ -140,6 +144,10 @@ def validate_inputs(args: argparse.Namespace) -> None:
         raise ValueError("--games must be > 0")
     if args.concurrency <= 0:
         raise ValueError("--concurrency must be > 0")
+    if args.new_threads <= 0:
+        raise ValueError("--new-threads must be > 0")
+    if args.base_threads <= 0:
+        raise ValueError("--base-threads must be > 0")
 
 
 def main() -> int:

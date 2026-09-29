@@ -31,7 +31,19 @@ DEFAULT REL
 %define ENABLE_FUTILITY 1
 %endif
 %ifndef ENABLE_LMR
-%define ENABLE_LMR 0
+%define ENABLE_LMR 1
+%endif
+%ifndef LMR_INDEX_MIN
+%define LMR_INDEX_MIN 4
+%endif
+%ifndef LMR_DEPTH_MIN
+%define LMR_DEPTH_MIN 3
+%endif
+%ifndef LMR_BASE_REDUCTION
+%define LMR_BASE_REDUCTION 1
+%endif
+%ifndef LMR_EXTRA_NON_IMPROVING
+%define LMR_EXTRA_NON_IMPROVING 1
 %endif
 %ifndef ENABLE_SINGULAR
 %define ENABLE_SINGULAR 1
@@ -41,6 +53,14 @@ DEFAULT REL
 RAZOR_MARGIN    equ 250         ; razoring: eval + margin < alpha pri depth 1
 FUTILITY_MARGIN equ 150         ; futility: margin = FUTILITY_MARGIN * depth (d1: 150, d2: 300)
 EVAL_NONE       equ 0x7FFFFF00  ; sentinel: ziadny static eval (uzol v sachu)
+
+%define PROT_READ   1
+%define PROT_WRITE  2
+%define MAP_SHARED  1
+%define MAP_ANON    32
+%define SIGCHLD     17
+%define FUTEX_WAIT  0
+%define FUTEX_WAKE  1
 
 section .data
 
@@ -71,11 +91,14 @@ asp_use:        resd 1          ; 1 = pouzi asp window (nastavuje uci_go)
 asp_retry:      resd 1          ; pocet aspiration re-search retry
 asp_prev_depth: resd 1          ; hlbska z predch. iteracie (kontrola continuity ID)
 root_alpha:     resd 1          ; aktualne alpha v root slucke
+smp_worker_mode: resd 1         ; 1 = volanie z helper procesu (rovno do single rezimu)
+smp_child_pids:    resq 8
 
 section .text
 
 global make_move, unmake_move, quiescence, negamax, search_best_move, perft
 global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
+global smp_worker_mode, smp_child_pids
 
 extern board, side, castle, enpassant, halfmove, fullmove
 extern moved_piece, captured_piece
@@ -90,11 +113,12 @@ extern compute_hash
 extern tt_probe, tt_store, position_hash
 extern check_repetition
 extern hash_history, hash_count
-extern tb_piece_count, tb_probe_wdl
+extern tb_piece_count, tb_probe_wdl, tb_path_len
 extern uci_syzygy_probe_depth
 extern search_poll_input
 extern book_lookup_all, book_moves, book_moves_len, book_mode, book_search_depth, book_rating_flag
 extern singular_excl
+extern smp_check_stop, smp_signal_stop
 
 ; ============================================================
 ; check_time - periodicka kontrola timeoutu pre UCI search
@@ -108,12 +132,20 @@ check_time:
     push rdx
     push rsi
     push rdi
+    ; stop signal z helper procesov cez MAP_SHARED stranku (smp modul)
+    call smp_check_stop
+    test eax, eax
+    jnz .ret_one
     cmp byte [uci_stop_flag], 0
     je .poll_input
     mov eax, 1
     jmp .ret
 
 .poll_input:
+    ; worker procesy pri SMP nesmu siahat na stdin/UCI protokol
+    cmp dword [smp_worker_mode], 0
+    jne .check_mode
+
     ; neblokujuce spracovanie stdin (stop/ponderhit/isready/quit)
     ; kazdych 128 nodov: pri pomalsich eval moduloch (napr. NNUE2)
     ; by 1024-node polling reagoval na stop/movetime prilis neskoro.
@@ -163,11 +195,17 @@ check_time:
     cmp rax, [search_limits + 64]
     jl .no_stop
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop         ; povedz helperom, nech tiez zastavia
     mov eax, 1
     jmp .ret
 
 .no_stop:
     xor eax, eax
+    jmp .ret
+
+.ret_one:
+    mov eax, 1
+    jmp .ret
 
 .ret:
     pop rdi
@@ -866,11 +904,16 @@ negamax:
     cmp qword [rbp - 8], rax
     jl .tb_skip
 
-    ; ak je na sachovnici <= 7 kamenov, skus WDL probe
+    ; bez nastavenej TB cesty nema probe zmysel (a obchadzame nestabilne vetvy)
+    cmp qword [tb_path_len], 0
+    jle .tb_skip
+
+    ; ak je na sachovnici <= 3 kamenov, skus WDL probe
+    ; 4+ piece sety nie su v engine este plne stabilne -> fallback na normalny search
     ; zname skore vratime okamzite; TB_NOT_FOUND = normalny search
     ; (pouzivame len caller-saved registre, nic nie je live)
     call tb_piece_count
-    cmp eax, 7
+    cmp eax, 3
     jg .tb_skip
     call tb_probe_wdl
     cmp eax, TB_NOT_FOUND
@@ -1766,26 +1809,37 @@ negamax:
     jmp .after_search
 
 .pvs_window:
-    ; --- LMR: quiet tah, index >= 4, depth >= 3, nie v sachu ---
+    ; --- LMR: quiet tah, index/depth prahy, nie v sachu ---
 %if ENABLE_LMR = 0
     jmp .no_lmr
 %endif
     cmp r12d, 1
     jne .no_lmr
-    cmp rcx, 4
+    cmp rcx, LMR_INDEX_MIN
     jl .no_lmr
-    cmp qword [rbp - 8], 3
+    cmp qword [rbp - 8], LMR_DEPTH_MIN
     jl .no_lmr
     cmp dword [rbp - 44], 0
     jne .no_lmr
-    ; redukovany search: depth-2, null window (alpha, alpha+1)
-    ; !improving (eval klesa/stagnuje): redukuj este o 1 (min. child depth 1)
+    ; redukovany search: child depth - LMR_BASE_REDUCTION
+    ; !improving (eval klesa/stagnuje): volitelna extra redukcia o 1
+    mov edx, LMR_BASE_REDUCTION
+.lmr_base_red_loop:
+    test edx, edx
+    jz .lmr_base_red_done
+    cmp rdi, 1
+    jle .lmr_base_red_done
     dec rdi
+    dec edx
+    jmp .lmr_base_red_loop
+.lmr_base_red_done:
+%if LMR_EXTRA_NON_IMPROVING = 1
     cmp dword [rbp - 64], 0
     jne .lmr_red_done
     cmp rdi, 2
     jl .lmr_red_done
     dec rdi
+%endif
 .lmr_red_done:
     mov rsi, [rbp - 16]
     neg rsi
@@ -2179,6 +2233,13 @@ search_best_move:
     push r14
     push r15
     mov rbp, rsp
+
+    ; helper procesy (smp.asm) musia ist rovno do single rezimu;
+    ; poistka proti buducej SMP dispatch logike
+    cmp dword [smp_worker_mode], 0
+    jne .sbm_single
+
+.sbm_single:
 
     mov qword [nodes_searched], 0
     mov dword [search_last_score], 0

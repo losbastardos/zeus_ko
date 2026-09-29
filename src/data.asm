@@ -157,7 +157,7 @@ global captured_by_black, captured_by_black_len
 global book_moves, book_moves_len, pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 
 global book_filename, config_filename, key_book, default_book, key_search_depth, default_search_depth
-global key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file
+global key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file, key_threads, default_threads
 global lang_file_en, lang_file_sk
 
 global lkey_menu_title, ldef_menu_title
@@ -265,6 +265,12 @@ key_nnue_file:
 
 default_nnue_file:
     db "net2.nnue", 0
+
+key_threads:
+    db "threads", 0
+
+default_threads:
+    db "1", 0
 
 lang_file_en:
     db "lang/en.ini", 0
@@ -508,13 +514,17 @@ board_flip:     resb 1
 ; 0 = engine hra biely, 1 = cierny, 2 = oboch, 3 = ziaden
 engine_side:    resb 1
 
-global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
+global uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
 uci_stop_flag:  resb 1
 uci_ponder:     resb 1
 uci_own_book:   resb 1
 uci_hash_size:  resd 1
 uci_move_overhead: resd 1    ; milliseconds overhead per move (default 100 ms)
 uci_syzygy_probe_depth: resd 1 ; minimalna hlbka pre TB probe (0 = vypnute)
+uci_threads:    resd 1       ; P2 scaffold: pocet threadov pre buduci Lazy SMP (1..8)
+global smp_shared, smp_child_count
+smp_shared:      resq 1      ; pointer na MAP_SHARED stranku: +0 = stop flag
+smp_child_count: resd 1      ; pocet bezucich helper procesov
 global book_mode, book_search_depth, eval_mode
 book_mode:      resb 1       ; 0 = instant prvy knizny tah, 1 = vyber searchom
 book_search_depth: resb 1    ; hlbka ratingu kniznych tahov (default 4)
