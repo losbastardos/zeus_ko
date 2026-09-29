@@ -15,7 +15,7 @@ DEFAULT REL
 %define SMP_STOP_OK     0
 %define PROT_RW         3        ; PROT_READ|PROT_WRITE
 %define MAP_SH_ANON     0x21     ; MAP_SHARED|MAP_ANONYMOUS
-%define MAP_ANON        32       ; MAP_ANONYMOUS (privátny)
+%define MAP_ANON        34       ; MAP_PRIVATE|MAP_ANONYMOUS (inak EINVAL)
 %define SIGCHLD         17
 
 %define SMP_MAX_WORKERS 7
