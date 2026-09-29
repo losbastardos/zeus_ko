@@ -301,10 +301,10 @@ nnue2_eval:
     jmp .sq_loop
 .activate:
     ; h[j] = clip(acc>>shift1, 0, 255); sum h*W2q
-    ; W2 base = r14 + F*H*2 ; b2 za nim
+    ; W2 base = r14 + F*H*2 + 4 (za W1 nasleduje b2q i32, az potom W2q)
     mov eax, NNUE2_F
     imul eax, r15d               ; F*H
-    lea rsi, [r14 + rax*2]       ; W2q
+    lea rsi, [r14 + rax*2 + 4]   ; W2q (posun cez b2q i32)
     mov ebx, eax
     shl ebx, 1
     lea rdi, [r14 + rbx]         ; b2q (int32)

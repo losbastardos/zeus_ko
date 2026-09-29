@@ -91,9 +91,17 @@ def load_rows(paths, max_pos: int):
         with open(path, "r", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 try:
-                    rows.append((r["fen"], float(r["result"])))
+                    fen = r["fen"]
+                    res = float(r["result"])
                 except Exception:
                     continue
+                # Label v Texel CSV je z pohladu BIELEHO (1.0 = vyhra bieleho),
+                # ale build_features koduje farby relativne voci strane na tahu.
+                # Pre pozicie, kde taha cierny, treba label preklopit, inac sa
+                # trenuje na protichodnom signali a siet sa nenauci nic.
+                if fen.split()[1] == "b":
+                    res = 1.0 - res
+                rows.append((fen, res))
     if max_pos and len(rows) > max_pos:
         rows = rows[:max_pos]
     return rows
@@ -116,10 +124,11 @@ def main() -> int:
         X[i] = build_features(chess.Board(fen))
         y[i] = res
 
-    # inicializacia: male nahodne vahy
-    W1 = rng.normal(0.0, 0.01, size=(F, H)).astype(np.float32)
-    b1 = np.zeros(H, dtype=np.float32)
-    W2 = rng.normal(0.0, 0.01, size=H).astype(np.float32)
+    # inicializacia: b1 kladne (jednotky zacinaju aktivne v CReLU pasme),
+    # W1 vacsie aby pre-aktivacie zily v rozumnom rozsahu (~jednotky cp)
+    W1 = rng.normal(0.0, 0.05, size=(F, H)).astype(np.float32)
+    b1 = np.full(H, 0.5, dtype=np.float32)
+    W2 = rng.normal(0.0, 0.02, size=H).astype(np.float32)
     b2 = np.float32(0.0)
     scale = np.float32(args.scale)
 
@@ -174,15 +183,21 @@ def main() -> int:
         if epoch == 0 or (epoch + 1) % 5 == 0:
             print(f"epoch {epoch+1}: logloss={ll:.5f}", flush=True)
 
-    # quantization: Q=128 na vahy, biasy x2048, posuvy 11 (symetricke)
-    # asm inference: acc = sum x*W1q + b1q ; h = clip(acc>>11, 0, 255)
-    #                eval_cp = (sum h*W2q + b2q) >> 11
-    W1q = np.clip(np.round(W1 * 128.0), -32768, 32767).astype(np.int16)
-    b1q = np.round(b1 * 2048.0).astype(np.int32)
-    W2q = np.clip(np.round(W2 * 128.0), -32768, 32767).astype(np.int16)
-    b2q = np.round(b2 * 2048.0).astype(np.int32)
-    shift1 = 11
-    shift2 = 11
+    # Kvantizacia: jednotny fixed-point scaling S = 2^shift pre vahy aj biasy.
+    # asm inference: acc = sum x*W1q + b1q ; h = clip(acc>>shift1, 0, 255)
+    #                eval_cp = (sum h*W2q + b2q) >> shift2
+    # Pozor: vahy a biasy MUSIA mat rovnaku skalu (S), inak sa funknet
+    # zdeformuje o konstantny faktor (starsi export x128/x2048 so shiftom 11
+    # stisol prispevok vah 16x a vysledna siet bola prakticky konstantna).
+    # shift=5 (S=32): W1 ~ +-15 float -> +-480 int16 (bez clipu), h*W2q
+    # sa zmesti do int32 s rezervou.
+    shift1 = 5
+    shift2 = 5
+    S = float(1 << shift1)
+    W1q = np.clip(np.round(W1 * S), -32768, 32767).astype(np.int16)
+    b1q = np.round(b1 * S).astype(np.int32)
+    W2q = np.clip(np.round(W2 * S), -32768, 32767).astype(np.int16)
+    b2q = int(np.round(float(b2) * S))
 
     with open(args.out, "wb") as f:
         f.write(MAGIC)
@@ -192,7 +207,7 @@ def main() -> int:
         f.write(struct.pack("<I", shift2))
         f.write(b1q.tobytes())
         f.write(W1q.tobytes())
-        f.write(b2q.tobytes())
+        f.write(struct.pack("<i", b2q))
         f.write(W2q.tobytes())
     size = 20 + b1q.nbytes + W1q.nbytes + 4 + W2q.nbytes
     print(f"written: {args.out} ({size} bytes)")
