@@ -56,3 +56,4 @@ utils/*
 !utils/tb_verify_3piece.sh
 net.nnue
 net2.nnue
+.superpowers/
