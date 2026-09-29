@@ -201,6 +201,7 @@ check_time:
 
 .no_stop:
     xor eax, eax
+    jmp .ret
 
 .ret_one:
     mov eax, 1
