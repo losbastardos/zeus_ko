@@ -183,6 +183,7 @@ extern nnue2_load
 extern key_nnue_file
 extern default_nnue_file
 extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
+extern smp_init, smp_clear_stop, smp_spawn_helpers, smp_stop_and_reap, smp_signal_stop
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
@@ -1089,6 +1090,7 @@ uci_str_btime:      db "btime", 0
 uci_str_winc:       db "winc", 0
 uci_str_binc:       db "binc", 0
 uci_str_movestogo:  db "movestogo", 0
+uci_str_threads:    db "threads", 0
 uci_str_infinite:   db "infinite", 0
 uci_str_ponder_kw:  db "ponder", 0
 
@@ -1288,6 +1290,7 @@ search_poll_input:
 
 .cmd_stop:
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop      ; zastav aj helper procesy
     jmp .next_line
 
 .cmd_quit:
@@ -1300,6 +1303,7 @@ search_poll_input:
     jmp .next_line
 .quit_stop:
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop      ; zastav aj helper procesy
     jmp .next_line
 
 .next_line:
@@ -1549,6 +1553,8 @@ uci_go:
     mov qword [search_limits + 64], rax
     mov byte [uci_stop_flag], 0
     mov byte [uci_quit_flag], 0
+    call smp_init
+    call smp_clear_stop
 
     ; parsuj argumenty za 'go'
     mov rdi, 2
@@ -1610,6 +1616,13 @@ uci_go:
     call uci_str_eq
     test rax, rax
     jnz .parse_movestogo
+
+    mov rdi, r15
+    mov rsi, rbx
+    lea rdx, [rel uci_str_threads]
+    call uci_str_eq
+    test rax, rax
+    jnz .parse_threads
 
     mov rdi, r15
     mov rsi, rbx
@@ -1731,6 +1744,28 @@ uci_go:
     mov rdi, rcx
     jmp .go_loop
 
+.parse_threads:
+    mov rdi, r14
+    call uci_token
+    cmp rax, -1
+    je .after_parse
+    mov rdi, rax
+    mov rsi, rbx
+    call uci_parse_int
+    test rax, rax
+    jz .after_parse
+    cmp rax, 1
+    jge .th_min_ok
+    mov rax, 1
+.th_min_ok:
+    cmp rax, 8
+    jle .th_store
+    mov rax, 8
+.th_store:
+    mov [uci_threads], eax
+    mov rdi, rcx
+    jmp .go_loop
+
 .set_infinite:
     mov byte [search_limits + 0], 3
     mov byte [search_limits + 1], 64
@@ -1792,6 +1827,12 @@ uci_go:
     xor r14d, r14d            ; best_depth
     mov r15, 1                ; current depth
     mov qword [uci_iter_dur], 0
+    cmp byte [uci_stop_flag], 0
+    jne .id_loop              ; stop hned: helperov nespustame
+    mov eax, [uci_threads]
+    cmp eax, 1
+    jle .id_loop
+    call smp_spawn_helpers
 
 .id_loop:
     cmp byte [uci_stop_flag], 0
@@ -1904,6 +1945,7 @@ uci_go:
     jmp .id_loop
 
 .id_done:
+    call smp_stop_and_reap    ; bezpecne aj bez helperov (child_count=0 -> hned return)
     test r13, r13
     jnz .id_have_best
     mov rdi, 1
