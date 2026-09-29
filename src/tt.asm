@@ -228,11 +228,15 @@ tt_store:
     ja .done
 
 .do_store:
-    mov [r11], rdi
+    ; lock-free: payload (8B) najprv, mfence, potom hash (8B).
+    ; x86 garantuje atomicitu aligned 8B zapisov; tt_probe cita hash az
+    ; po payloade, takze torn read da len validny (starsi) zaznam.
     mov [r11 + 8], r8w
     mov byte [r11 + 10], sil
     mov byte [r11 + 11], cl
     mov dword [r11 + 12], edx
+    mfence
+    mov [r11], rdi
 
 .done:
     pop r11
