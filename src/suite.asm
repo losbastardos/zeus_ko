@@ -66,6 +66,7 @@ suite_saved_hcount:  resq 1
 suite_saved_hhist:   resq 256
 suite_saved_limits:  resb 72
 suite_saved_uci_stop: resb 1
+suite_saved_syzygy_depth: resd 1
 
 section .text
 
@@ -78,6 +79,7 @@ extern hash_history, hash_count
 extern parse_fen_string, search_best_move
 extern print_number, print_newline, write_cstr, uci_now_ms
 extern search_limits, uci_stop_flag
+extern uci_syzygy_probe_depth
 
 ; ------------------------------------------------------------
 ; util: token parser nad move_buf
@@ -1246,6 +1248,8 @@ suite_snapshot_save:
 
     mov al, [uci_stop_flag]
     mov [suite_saved_uci_stop], al
+    mov eax, [uci_syzygy_probe_depth]
+    mov [suite_saved_syzygy_depth], eax
 
     pop rdi
     pop rsi
@@ -1289,6 +1293,8 @@ suite_snapshot_restore:
 
     mov al, [suite_saved_uci_stop]
     mov [uci_stop_flag], al
+    mov eax, [suite_saved_syzygy_depth]
+    mov [uci_syzygy_probe_depth], eax
 
     pop rdi
     pop rsi
@@ -1457,6 +1463,10 @@ suite_cmd_suite_file:
 
 .open:
     call suite_snapshot_save
+
+    ; v benchmark suite rezime Syzygy probe vypiname:
+    ; EPD testy netreba mapovat na TB a vyhneme sa nestabilnym vetvam.
+    mov dword [uci_syzygy_probe_depth], 0
 
     mov qword [suite_cases], 0
     mov qword [suite_hits], 0

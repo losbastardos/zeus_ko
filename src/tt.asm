@@ -16,7 +16,7 @@ DEFAULT REL
 
 %define PROT_READ   1
 %define PROT_WRITE  2
-%define MAP_PRIVATE 2
+%define MAP_SHARED  1
 %define MAP_ANON    32
 
 section .bss
@@ -74,7 +74,7 @@ tt_init:
     xor rdi, rdi                ; addr = NULL
     mov rsi, rbx                ; len
     mov rdx, PROT_READ | PROT_WRITE
-    mov r10, MAP_PRIVATE | MAP_ANON
+    mov r10, MAP_SHARED | MAP_ANON
     mov r8, -1
     xor r9, r9
     syscall
