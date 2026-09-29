@@ -138,6 +138,9 @@ tt_clear:
 ;         eax=score (ak status=1), r8w=move (ak hit)
 ; ============================================================
 tt_probe:
+    ; INVARIANT: citame hash az po payload (move/score/flag) kvoli lock-free
+    ; store protokolu v tt_store (payload -> mfence -> hash). Otocenie poradia
+    ; citania rozbije synchronizaciu a nesmie sa urobit.
     push rbx
     push r9
     push r10

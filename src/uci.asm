@@ -184,6 +184,7 @@ extern key_nnue_file
 extern default_nnue_file
 extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
 extern smp_init, smp_clear_stop, smp_spawn_helpers, smp_stop_and_reap, smp_signal_stop
+extern smp_shared
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 extern make_move, unmake_move, tt_probe
@@ -1752,9 +1753,7 @@ uci_go:
     mov rdi, rax
     mov rsi, rbx
     call uci_parse_int
-    test rax, rax
-    jz .after_parse
-    cmp rax, 1
+    cmp rax, 1                   ; clamp: minimum 1 (threads 0 -> 1), parse pokracuje
     jge .th_min_ok
     mov rax, 1
 .th_min_ok:
@@ -1815,7 +1814,6 @@ uci_go:
     jz .no_book
     mov byte [uci_move_source], 1
     jmp .do_move
-    jmp .no_book
 .think_book:
     call book_pick_move
     test rax, rax
@@ -1832,6 +1830,9 @@ uci_go:
     mov eax, [uci_threads]
     cmp eax, 1
     jle .id_loop
+    mov rax, [smp_shared]        ; spawn guard: bez shared stop-flag helperov nespustame
+    test rax, rax
+    jz .id_loop
     call smp_spawn_helpers
 
 .id_loop:

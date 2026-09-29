@@ -12,7 +12,7 @@ DEFAULT REL
 ; SYS_MMAP chyba v chess.inc, definujeme lokalne (SYS_EXIT, SYS_WAIT4,
 ; SYS_CLOCK_GETTIME, SYS_CLONE, CLOCK_MONOTONIC uz existuju)
 %define SYS_MMAP        9
-%define SMP_STOP_OK     0
+%define SYS_MUNMAP      11
 %define PROT_RW         3        ; PROT_READ|PROT_WRITE
 %define MAP_SH_ANON     0x21     ; MAP_SHARED|MAP_ANONYMOUS
 %define MAP_ANON        34       ; MAP_PRIVATE|MAP_ANONYMOUS (inak EINVAL)
@@ -209,11 +209,10 @@ smp_worker_main:
 ; smp_stop_and_reap - signalizuj stop a pockaj na vsetkych helperov
 ; ============================================================
 smp_stop_and_reap:
-    push rbx
     call smp_signal_stop
 .reap_loop:
     cmp dword [smp_child_count], 0
-    jle .done
+    jle .unmap_stacks
     mov rax, SYS_WAIT4
     mov rdi, -1                  ; lubovolne dieta
     lea rsi, [smp_status]
@@ -221,9 +220,30 @@ smp_stop_and_reap:
     xor r10d, r10d
     syscall
     test rax, rax
-    js .done                     ; chyba (zombie uz nie su) - koncime
+    js .unmap_stacks             ; chyba (zombie uz nie su) - koncime
     dec dword [smp_child_count]
     jmp .reap_loop
-.done:
+.unmap_stacks:
+    ; uvolnime vsetky mmap helper stacky (aj tych, ktorym clone zlyhal);
+    ; po munmape slot vynulujeme, aby sa pri dalsom go znova mmmapli
+    ; counter v rbx: syscall prepsie rcx (return RIP), ecx by slucku zrusil
+    push rbx
+    mov ebx, 1
+.unmap_loop:
+    cmp ebx, SMP_MAX_WORKERS
+    jg .unmap_done
+    mov rsi, [smp_stack_tops + rbx*8 - 8]
+    test rsi, rsi
+    jz .unmap_next
+    mov rax, SYS_MUNMAP
+    lea rdi, [rsi - SMP_STACK_SIZE]
+    mov rsi, SMP_STACK_SIZE
+    syscall
+    mov qword [smp_stack_tops + rbx*8 - 8], 0
+.unmap_next:
+    inc ebx
+    jmp .unmap_loop
+.unmap_done:
     pop rbx
+.done:
     ret
