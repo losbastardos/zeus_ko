@@ -91,17 +91,8 @@ asp_use:        resd 1          ; 1 = pouzi asp window (nastavuje uci_go)
 asp_retry:      resd 1          ; pocet aspiration re-search retry
 asp_prev_depth: resd 1          ; hlbska z predch. iteracie (kontrola continuity ID)
 root_alpha:     resd 1          ; aktualne alpha v root slucke
-smp_worker_mode: resd 1         ; 0=master, 1=worker call (zabranenie rekurzivnej SMP dispatch)
-smp_filter_mod:  resd 1         ; root slicing: tah sa berie ak (idx % mod) == smp_filter_idx
-smp_filter_idx:  resd 1
-smp_worker_scores: resd 8       ; diagnostika/skladanie best skore po worker calloch
-smp_worker_moves:  resd 8
-smp_worker_nodes:  resq 8
+smp_worker_mode: resd 1         ; 1 = volanie z helper procesu (rovno do single rezimu)
 smp_child_pids:    resq 8
-smp_read_fds:      resd 8
-smp_pipe_pair:     resd 2
-smp_result_buf:    resb 16      ; move(u32), score(i32), nodes(u64)
-smp_wait_status:   resd 1
 
 section .text
 
@@ -124,10 +115,10 @@ extern check_repetition
 extern hash_history, hash_count
 extern tb_piece_count, tb_probe_wdl, tb_path_len
 extern uci_syzygy_probe_depth
-extern uci_threads
 extern search_poll_input
 extern book_lookup_all, book_moves, book_moves_len, book_mode, book_search_depth, book_rating_flag
 extern singular_excl
+extern smp_check_stop, smp_signal_stop
 
 ; ============================================================
 ; check_time - periodicka kontrola timeoutu pre UCI search
@@ -141,6 +132,10 @@ check_time:
     push rdx
     push rsi
     push rdi
+    ; stop signal z helper procesov cez MAP_SHARED stranku (smp modul)
+    call smp_check_stop
+    test eax, eax
+    jnz .ret_one
     cmp byte [uci_stop_flag], 0
     je .poll_input
     mov eax, 1
@@ -200,11 +195,16 @@ check_time:
     cmp rax, [search_limits + 64]
     jl .no_stop
     mov byte [uci_stop_flag], 1
+    call smp_signal_stop         ; povedz helperom, nech tiez zastavia
     mov eax, 1
     jmp .ret
 
 .no_stop:
     xor eax, eax
+
+.ret_one:
+    mov eax, 1
+    jmp .ret
 
 .ret:
     pop rdi
@@ -2233,173 +2233,10 @@ search_best_move:
     push r15
     mov rbp, rsp
 
-    ; --------------------------------------------------------
-    ; P2-v3 Lazy SMP: clone + pipe + wait4.
-    ; Master rozdeli root tahy na slices (idx % Threads) a spusti
-    ; worker procesy paralelne; agreguje best score/move + nodes.
-    ; TT je mapovana cez MAP_SHARED, teda je zdielana medzi workermi.
-    ; --------------------------------------------------------
-    mov rbx, rdi
+    ; helper procesy (smp.asm) musia ist rovno do single rezimu;
+    ; poistka proti buducej SMP dispatch logike
     cmp dword [smp_worker_mode], 0
     jne .sbm_single
-    mov eax, [uci_threads]
-    cmp eax, 1
-    jle .sbm_single
-    cmp rbx, 2
-    jl .sbm_single
-
-    mov dword [smp_filter_mod], eax
-    xor r12d, r12d              ; worker_idx / loop idx
-    mov r13d, -INF              ; global best score
-    xor r14d, r14d              ; global best move
-    xor r15, r15                ; total nodes
-    xor r10d, r10d              ; best worker idx
-
-.smp_spawn_loop:
-    cmp r12d, [uci_threads]
-    jge .smp_collect_loop_start
-
-    ; pipe pre worker vysledok
-    mov rax, SYS_PIPE
-    lea rdi, [smp_pipe_pair]
-    syscall
-    test rax, rax
-    js .smp_fallback
-
-    ; clone worker (fork-like semantics)
-    mov rax, SYS_CLONE
-    mov rdi, SIGCHLD
-    xor rsi, rsi
-    xor rdx, rdx
-    xor r10, r10
-    xor r8, r8
-    syscall
-    test rax, rax
-    js .smp_fallback
-    jz .smp_child
-
-    ; parent: uloz pid + read-fd, zavri write-fd
-    mov [smp_child_pids + r12*8], rax
-    mov eax, [smp_pipe_pair + 0]
-    mov [smp_read_fds + r12*4], eax
-    mov eax, SYS_CLOSE
-    mov edi, [smp_pipe_pair + 4]
-    syscall
-
-    inc r12d
-    jmp .smp_spawn_loop
-
-.smp_child:
-    ; child: nastav worker filter, prehladaj svoj slice
-    mov rax, SYS_CLOSE
-    mov edi, [smp_pipe_pair + 0]
-    syscall
-
-    mov [smp_filter_idx], r12d
-    mov dword [smp_worker_mode], 1
-
-    mov rdi, rbx
-    call search_best_move
-
-    ; serialize result do 16B bufferu
-    mov [smp_result_buf + 0], eax
-    mov edx, [search_last_score]
-    mov [smp_result_buf + 4], edx
-    mov rdx, [nodes_searched]
-    mov [smp_result_buf + 8], rdx
-
-    mov rax, SYS_WRITE
-    mov edi, [smp_pipe_pair + 4]
-    lea rsi, [smp_result_buf]
-    mov edx, 16
-    syscall
-
-    ; futex wake ostava ako no-op signal pre buduci thread mode
-    mov rax, SYS_FUTEX
-    lea rdi, [smp_wait_status]
-    mov rsi, FUTEX_WAKE
-    mov rdx, 1
-    xor r10, r10
-    xor r8, r8
-    xor r9, r9
-    syscall
-
-    mov rax, SYS_CLOSE
-    mov edi, [smp_pipe_pair + 4]
-    syscall
-
-    mov eax, SYS_EXIT
-    xor edi, edi
-    syscall
-
-.smp_collect_loop_start:
-    ; join workerov deterministicky cez wait4 + read z pipe
-    xor r12d, r12d
-.smp_collect_loop:
-    cmp r12d, [uci_threads]
-    jge .smp_workers_done
-
-    ; read worker result
-    mov rax, SYS_READ
-    mov edi, [smp_read_fds + r12*4]
-    lea rsi, [smp_result_buf]
-    mov edx, 16
-    syscall
-
-    mov rax, SYS_CLOSE
-    mov edi, [smp_read_fds + r12*4]
-    syscall
-
-    ; wait child
-    mov rax, SYS_WAIT4
-    mov rdi, [smp_child_pids + r12*8]
-    lea rsi, [smp_wait_status]
-    xor edx, edx
-    xor r10d, r10d
-    syscall
-
-    mov eax, [smp_result_buf + 0]
-    mov [smp_worker_moves + r12*4], eax
-    mov eax, [smp_result_buf + 4]
-    mov [smp_worker_scores + r12*4], eax
-    mov rax, [smp_result_buf + 8]
-    mov [smp_worker_nodes + r12*8], rax
-    add r15, rax
-
-    mov eax, [smp_worker_scores + r12*4]
-    cmp eax, r13d
-    jle .smp_next_worker
-    mov r13d, eax
-    mov eax, [smp_worker_moves + r12*4]
-    mov r14d, eax
-    mov r10d, r12d
-
-.smp_next_worker:
-    inc r12d
-    jmp .smp_collect_loop
-
-.smp_fallback:
-    ; ak spawn zlyha, korektne fallbackni na single search
-    mov dword [smp_filter_mod], 1
-    mov dword [smp_filter_idx], 0
-    mov dword [smp_worker_mode], 0
-    jmp .sbm_single
-
-.smp_workers_done:
-    ; dopocitaj PV konzistentne pre vybrany best slice
-    mov [smp_filter_idx], r10d
-    mov dword [smp_worker_mode], 1
-    mov rdi, rbx
-    call search_best_move
-    mov dword [smp_worker_mode], 0
-
-    mov dword [smp_filter_mod], 1
-    mov dword [smp_filter_idx], 0
-    mov qword [nodes_searched], r15
-    mov dword [search_last_score], r13d
-    mov dword [root_best_move], r14d
-    mov eax, r14d
-    jmp .sbm_exit
 
 .sbm_single:
 
@@ -2442,19 +2279,6 @@ search_best_move:
     movzx r12, word [move_count]
     test r12, r12
     jz .no_moves
-
-    ; worker slice bez kandidatov: tento worker nema co hladat
-    cmp dword [smp_worker_mode], 0
-    je .slice_has_work
-    cmp dword [smp_filter_mod], 1
-    jle .slice_has_work
-    mov eax, [smp_filter_idx]
-    cmp eax, r12d
-    jl .slice_has_work
-    mov dword [search_last_score], -INF
-    xor eax, eax
-    jmp .sbm_exit
-.slice_has_work:
 
     ; lokalna kopia tahov
     mov rax, r12
@@ -2557,17 +2381,6 @@ search_best_move:
     mov [rsp + r10*2], ax
 
 .root_sel_picked:
-
-    ; worker slicing: tento worker berie len svoju kongruencnu triedu
-    mov eax, [smp_filter_mod]
-    cmp eax, 1
-    jle .root_slice_ok
-    mov eax, ecx
-    xor edx, edx
-    div dword [smp_filter_mod]
-    cmp edx, [smp_filter_idx]
-    jne .next
-.root_slice_ok:
 
     movzx rax, word [rsp + rcx*2]
     push rcx
