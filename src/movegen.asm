@@ -19,6 +19,7 @@ extern board, side, castle, enpassant, move_list, move_count
 extern knight_offsets, bishop_dirs, rook_dirs, king_dirs
 extern print_number, print_newline
 extern filter_legal_moves
+extern prof_movegen
 
 ; ============================================================
 ; add_move - prida tah do move_list
@@ -121,6 +122,7 @@ is_own_piece:
 ; generate_all_moves
 ; ============================================================
 generate_all_moves:
+    inc qword [prof_movegen]
     push rax
     push rbx
     push rcx

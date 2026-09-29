@@ -51,6 +51,7 @@ utils/*
 !utils/sprt_ab_run.sh
 !utils/sprt_match.py
 !utils/strength_gate.sh
+!utils/bench_report.sh
 !utils/syzygy_alias_links.sh
 !utils/syzygy_oracle.py
 !utils/tb_verify_3piece.sh

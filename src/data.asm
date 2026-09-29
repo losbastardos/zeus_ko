@@ -49,7 +49,10 @@ global msg_files_rev, msg_files_rev_len
 
 global rank_char_buf, square_char_buf, square_str_buf, num_buf
 global square_str_buf
-global bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
+global bench_str_header, bench_str_fens_mid, bench_str_nodes, bench_str_time, bench_str_nps
+global bench_str_bench_line, bench_str_time_ms, bench_str_nps_eq, bench_str_depth_eq
+global bench_str_p_qnodes, bench_str_p_main, bench_str_p_evals, bench_str_p_movegen
+global bench_str_p_makes, bench_str_p_unmakes, bench_str_pct, bench_str_pct_end
 global bench_fens, bench_fens_count
 
 ; Pociatocna pozicia
@@ -99,10 +102,23 @@ msg_error_input:
     db "Neplatny vstup! e2e4, list, flip, perft N, bench, suite FILE [N], gfx, text, new, go, exit.", 10, 0
 msg_error_input_len equ $ - msg_error_input - 1
 
-bench_str_header: db "Bench: prehladavam 6 pozicii do hlbky 9...", 10, 0
+bench_str_header: db "Bench: prehladavam ", 0
+bench_str_fens_mid: db " FEN pozicii do hlbky ", 0
 bench_str_nodes:  db "Uzly: ", 0
-bench_str_time:   db "Cas (ms): ", 0
-bench_str_nps:    db "NPS: ", 0
+bench_str_time:   db ", cas (ms): ", 0
+bench_str_nps:    db ", NPS: ", 0
+bench_str_bench_line: db "bench: nodes=", 0
+bench_str_time_ms: db " time_ms=", 0
+bench_str_nps_eq: db " nps=", 0
+bench_str_depth_eq: db " depth=", 0
+bench_str_p_qnodes: db "prof qsearch: ", 0
+bench_str_p_main:   db "prof main: ", 0
+bench_str_p_evals:  db "prof evals: ", 0
+bench_str_p_movegen: db "prof movegen: ", 0
+bench_str_p_makes:  db "prof makes: ", 0
+bench_str_p_unmakes: db "prof unmakes: ", 0
+bench_str_pct:    db " (", 0
+bench_str_pct_end: db "%)", 0
 
 msg_error_illegal:
     db "Nelegalny tah!", 10, 0

@@ -130,6 +130,7 @@ section .text
 extern board
 extern side, eval_mode
 extern nnue2_eval, nnue2_ready
+extern prof_evals
 
 ; ============================================================
 ; MOB_WALK df, dr, sliding - krok/luc mobility z policka
@@ -277,6 +278,7 @@ eval_knight_outpost:
 ;       skore = (mg*phase + eg*(24-phase)) / 24
 ; ============================================================
 evaluate:
+    inc qword [prof_evals]
     push rbp
     mov rbp, rsp
     sub rsp, 112

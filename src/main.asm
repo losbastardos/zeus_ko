@@ -9,9 +9,18 @@
 
 %include "chess.inc"
 
+%define BENCH_DEPTH 13         ; fixna hlbka benchu (na nezatazenom ~7-15 s, pri zatazeni do ~60 s)
+
 DEFAULT REL
 
 section .data
+
+; akumulatory profiloveho rozpadu pre bench (sucet cez vsetky FEN)
+bench_acc_qnodes:  dq 0
+bench_acc_evals:   dq 0
+bench_acc_movegen: dq 0
+bench_acc_makes:   dq 0
+bench_acc_unmakes: dq 0
 
 menu_header:
     db 27,"[96m+---------------------+",27,"[0m",10
@@ -177,7 +186,13 @@ extern uci_loop
 extern clear_history, record_move, book_lookup_all, print_status
 extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
 extern bench_fens, bench_fens_count
-extern bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
+extern bench_str_header, bench_str_fens_mid, bench_str_nodes, bench_str_time, bench_str_nps
+extern prof_qnodes, prof_evals, prof_movegen, prof_makes, prof_unmakes
+extern bench_str_p_qnodes, bench_str_p_main, bench_str_p_evals, bench_str_p_movegen
+extern bench_str_p_makes, bench_str_p_unmakes
+extern bench_str_bench_line, bench_str_time_ms, bench_str_nps_eq, bench_str_depth_eq
+extern bench_str_pct, bench_str_pct_end
+extern book_rating_flag
 extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
 extern key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file, key_threads, default_threads
 extern lang_file_en, lang_file_sk
@@ -1265,9 +1280,24 @@ _start:
     jmp .game_loop
 
 .do_bench:
-    ; Zobraz popis bench
+    ; Zobraz popis bench: "Bench: prehladavam N FEN pozicii do hlbky D"
     lea rdi, [bench_str_header]
     call write_cstr
+    mov rax, bench_fens_count
+    call print_number
+    lea rdi, [bench_str_fens_mid]
+    call write_cstr
+    mov rax, BENCH_DEPTH
+    call print_number
+    call print_newline
+
+    ; vynuluj profilove akumulatory
+    xor eax, eax
+    mov [bench_acc_qnodes], rax
+    mov [bench_acc_evals], rax
+    mov [bench_acc_movegen], rax
+    mov [bench_acc_makes], rax
+    mov [bench_acc_unmakes], rax
 
     ; cas start
     call uci_now_ms
@@ -1277,7 +1307,11 @@ _start:
     ; Uloz stav hry (board, side, castle, ep, hash_history, search_limits)
     call suite_snapshot_save
 
-    ; --- beznaj vsektych 6 FEN pozicii s depth 9 ---
+    ; bench nesmie zozierat stdin: vypni input polling pocas searchu
+    ; (inak piped "quit" abortne search po prvych 128 uzloch)
+    mov byte [book_rating_flag], 1
+
+    ; --- prehladaj vsetky FEN pozicie do fixnej hlbky BENCH_DEPTH ---
     xor r13, r13                ; r13 = index
 .bench_loop:
     cmp r13, bench_fens_count
@@ -1291,13 +1325,23 @@ _start:
     call record_hash
     call clear_history
 
-    ; Urob search do hlbky 9
-    mov rdi, 9
+    ; Urob search do fixnej hlbky
+    mov rdi, BENCH_DEPTH
     call search_best_move
 
-    ; Pricti nodes (nodes_searched)
+    ; Pricti nodes (nodes_searched) a profilove countery
     mov rax, [nodes_searched]
     add r14, rax
+    mov rax, [prof_qnodes]
+    add [bench_acc_qnodes], rax
+    mov rax, [prof_evals]
+    add [bench_acc_evals], rax
+    mov rax, [prof_movegen]
+    add [bench_acc_movegen], rax
+    mov rax, [prof_makes]
+    add [bench_acc_makes], rax
+    mov rax, [prof_unmakes]
+    add [bench_acc_unmakes], rax
 
     inc r13
     jmp .bench_loop
@@ -1305,40 +1349,135 @@ _start:
 .bench_done:
     ; Obnov stav hry
     call suite_snapshot_restore
+    mov byte [book_rating_flag], 0
 
     ; Vypocitaj cas
     call uci_now_ms
     sub rax, r15                ; elapsed ms
     mov r15, rax
 
-    ; Vypis nodes
-    lea rdi, [bench_str_nodes]
-    call write_cstr
-    mov rdi, r14
-    call print_number
-    call print_newline
-
-    ; Vypis cas
-    lea rdi, [bench_str_time]
-    call write_cstr
-    mov rdi, r15
-    call print_number
-    call print_newline
-
-    ; Vypis NPS (nodes * 1000 / ms)
+    ; NPS = nodes * 1000 / ms (r12 = nps, 0 ak cas 0)
+    xor r12, r12
     test r15, r15
-    jz .bench_skip_nps
+    jz .bench_nps_done
     mov rax, r14
     imul rax, 1000
     xor rdx, rdx
     div r15
-    mov r13, rax            ; r13 = NPS (callee-saved)
+    mov r12, rax
+.bench_nps_done:
+
+    ; --- human-readable sumar ---
+    lea rdi, [bench_str_nodes]
+    call write_cstr
+    mov rax, r14
+    call print_number
+    lea rdi, [bench_str_time]
+    call write_cstr
+    mov rax, r15
+    call print_number
     lea rdi, [bench_str_nps]
     call write_cstr
-    mov rdi, r13
+    mov rax, r12
     call print_number
     call print_newline
-.bench_skip_nps:
+
+    ; --- strojovo citatelny riadok: bench: nodes=N time_ms=T nps=X depth=D ---
+    lea rdi, [bench_str_bench_line]
+    call write_cstr
+    mov rax, r14
+    call print_number
+    lea rdi, [bench_str_time_ms]
+    call write_cstr
+    mov rax, r15
+    call print_number
+    lea rdi, [bench_str_nps_eq]
+    call write_cstr
+    mov rax, r12
+    call print_number
+    lea rdi, [bench_str_depth_eq]
+    call write_cstr
+    mov rax, BENCH_DEPTH
+    call print_number
+    call print_newline
+
+    ; --- profilovy rozpad (percenta z total uzlov) ---
+    ; qsearch %
+    lea rdi, [bench_str_p_qnodes]
+    call write_cstr
+    mov rax, [bench_acc_qnodes]
+    call print_number
+    lea rdi, [bench_str_pct]
+    call write_cstr
+    mov rax, [bench_acc_qnodes]
+    imul rax, 100
+    xor rdx, rdx
+    div r14
+    mov rax, rax
+    call print_number
+    lea rdi, [bench_str_pct_end]
+    call write_cstr
+    call print_newline
+    ; main search % (doplnok qsearchu do 100 %)
+    lea rdi, [bench_str_p_main]
+    call write_cstr
+    mov rax, r14
+    sub rax, [bench_acc_qnodes]
+    mov r13, rax
+    call print_number
+    lea rdi, [bench_str_pct]
+    call write_cstr
+    mov rax, r13
+    imul rax, 100
+    xor rdx, rdx
+    div r14
+    call print_number
+    lea rdi, [bench_str_pct_end]
+    call write_cstr
+    call print_newline
+    ; evals
+    lea rdi, [bench_str_p_evals]
+    call write_cstr
+    mov rax, [bench_acc_evals]
+    call print_number
+    lea rdi, [bench_str_pct]
+    call write_cstr
+    mov rax, [bench_acc_evals]
+    imul rax, 100
+    xor rdx, rdx
+    div r14
+    mov rax, rax
+    call print_number
+    lea rdi, [bench_str_pct_end]
+    call write_cstr
+    call print_newline
+    ; movegen
+    lea rdi, [bench_str_p_movegen]
+    call write_cstr
+    mov rax, [bench_acc_movegen]
+    call print_number
+    lea rdi, [bench_str_pct]
+    call write_cstr
+    mov rax, [bench_acc_movegen]
+    imul rax, 100
+    xor rdx, rdx
+    div r14
+    mov rax, rax
+    call print_number
+    lea rdi, [bench_str_pct_end]
+    call write_cstr
+    call print_newline
+    ; makes / unmakes (pocet na 100 uzlov)
+    lea rdi, [bench_str_p_makes]
+    call write_cstr
+    mov rax, [bench_acc_makes]
+    call print_number
+    call print_newline
+    lea rdi, [bench_str_p_unmakes]
+    call write_cstr
+    mov rax, [bench_acc_unmakes]
+    call print_number
+    call print_newline
     jmp .game_loop
 
 .do_flip:

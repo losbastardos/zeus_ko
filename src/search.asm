@@ -94,11 +94,19 @@ root_alpha:     resd 1          ; aktualne alpha v root slucke
 smp_worker_mode: resd 1         ; 1 = volanie z helper procesu (rovno do single rezimu)
 smp_child_pids:    resq 8
 
+; --- Lightweight profilove countery (bench/report; inkrement = 1 instr) ---
+prof_qnodes:    resq 1          ; uzly v quiescence
+prof_evals:     resq 1          ; volania evaluate
+prof_movegen:   resq 1          ; volania generate_all_moves
+prof_makes:     resq 1          ; volania make_move
+prof_unmakes:   resq 1          ; volania unmake_move
+
 section .text
 
 global make_move, unmake_move, quiescence, negamax, search_best_move, perft
 global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 global smp_worker_mode, smp_child_pids
+global prof_qnodes, prof_evals, prof_movegen, prof_makes, prof_unmakes
 
 extern board, side, castle, enpassant, halfmove, fullmove
 extern moved_piece, captured_piece
@@ -220,6 +228,7 @@ check_time:
 ; Vstup: ax = 16-bitovy tah
 ; ============================================================
 make_move:
+    inc qword [prof_makes]
     push rbx
     push r12
     push r13
@@ -296,6 +305,7 @@ make_move:
 ; unmake_move - obnovi poziciu z undo_stack
 ; ============================================================
 unmake_move:
+    inc qword [prof_unmakes]
     push rbx
     push r12
     push r13
@@ -416,6 +426,7 @@ quiescence:
     mov rbp, rsp
 
     inc qword [nodes_searched]
+    inc qword [prof_qnodes]
     call check_time
     test eax, eax
     jz .qs_continue
@@ -2242,6 +2253,11 @@ search_best_move:
 .sbm_single:
 
     mov qword [nodes_searched], 0
+    mov qword [prof_qnodes], 0
+    mov qword [prof_evals], 0
+    mov qword [prof_movegen], 0
+    mov qword [prof_makes], 0
+    mov qword [prof_unmakes], 0
     mov dword [search_last_score], 0
     mov qword [search_ply], 0
     mov qword [root_pv_len], 0   ; root PV zacina prazdna
