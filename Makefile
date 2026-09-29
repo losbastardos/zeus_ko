@@ -14,12 +14,20 @@ SRCS        = main.asm board.asm move.asm movegen.asm legal.asm io.asm data.asm 
 
 SRCS_STATIC = $(filter-out gfx/sdl.asm,$(SRCS)) gfx/sdl_stub.asm
 
-OBJS        = $(SRCS:%.asm=$(OBJDIR)/%.o)
+HAVE_SDL    ?= $(shell if command -v sdl2-config >/dev/null 2>&1; then echo 1; elif command -v pkg-config >/dev/null 2>&1 && pkg-config --exists sdl2; then echo 1; else echo 0; fi)
+
+ifeq ($(HAVE_SDL),1)
+SRCS_DYNAMIC = $(SRCS)
+SDL_LIBS    ?= $(shell if command -v sdl2-config >/dev/null 2>&1; then sdl2-config --libs; else pkg-config --libs sdl2; fi)
+else
+SRCS_DYNAMIC = $(SRCS_STATIC)
+SDL_LIBS    ?=
+endif
+
+OBJS        = $(SRCS_DYNAMIC:%.asm=$(OBJDIR)/%.o)
 OBJS_STATIC = $(SRCS_STATIC:%.asm=$(OBJDIR)/%.o)
 
 CC          ?= gcc
-SDL_CONFIG  ?= $(shell command -v sdl2-config 2>/dev/null || command -v pkg-config 2>/dev/null)
-SDL_LIBS    ?= $(shell $(SDL_CONFIG) --libs 2>/dev/null || $(SDL_CONFIG) --libs sdl2 2>/dev/null)
 # Standardny interpreter ak existuje (FHS systemy), inac cesta od gcc (NixOS).
 DYN_LINKER  ?= $(shell [ -e /lib64/ld-linux-x86-64.so.2 ] && echo /lib64/ld-linux-x86-64.so.2 || $(CC) -print-file-name=ld-linux-x86-64.so.2)
 LDFLAGS_BIN ?= -Wl,--dynamic-linker=$(DYN_LINKER)
@@ -31,7 +39,7 @@ COMMANDS_DEBUG_LOG ?= commands_debug.log
 COMMANDS_DEBUG ?= $(shell awk -F= 'tolower($$1) ~ /^[[:space:]]*debug[[:space:]]*$$/ {v=tolower($$2); gsub(/[[:space:]]/,"",v); print (v ~ /^(1|true|yes|on)$$/ ? 1 : 0); found=1; exit} END {if (!found) print 0}' chess.ini 2>/dev/null)
 LOG_RUN = COMMANDS_DEBUG=$(COMMANDS_DEBUG) COMMANDS_DEBUG_LOG=$(COMMANDS_DEBUG_LOG) bash tests/tuning/command_debug_run.sh
 
-.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings variant-static variant-rfp0 variant-lmr0 variant-lmp0 variant-null0
+.PHONY: all clean run test strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan lmr-param-sweep commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab thread-matrix-ab sprt-threads-matrix rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings variant-static variant-rfp0 variant-lmr0 variant-lmp0 variant-null0
 
 all: $(TARGET) $(TARGET_STATIC)
 
@@ -177,17 +185,30 @@ lmr-lmp-rfp-scan: $(TARGET_STATIC)
 	  $(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),6,8)" --timeout "$(or $(TIMEOUT),900s)" --report "$(or $(REPORT),tests/reports/lmr_lmp_rfp_scan.txt)" --csv "$(or $(CSV),tests/reports/lmr_lmp_rfp_scan.csv)"; \
 	fi
 
+lmr-param-sweep: $(TARGET_STATIC)
+	@PYBIN="$(or $(TUNE_PYTHON),python3)"; \
+	if [[ -x tests/tuning/.venv/bin/python && "$$PYBIN" == "python3" ]]; then PYBIN="tests/tuning/.venv/bin/python"; fi; \
+	LMR_IDX_ARG=""; if [[ -n "$(LMR_INDEX_MIN)" ]]; then LMR_IDX_ARG="--lmr-index-min \"$(LMR_INDEX_MIN)\""; fi; \
+	LMR_DEP_ARG=""; if [[ -n "$(LMR_DEPTH_MIN)" ]]; then LMR_DEP_ARG="--lmr-depth-min \"$(LMR_DEPTH_MIN)\""; fi; \
+	LMR_BASE_ARG=""; if [[ -n "$(LMR_BASE_REDUCTION)" ]]; then LMR_BASE_ARG="--lmr-base-reduction \"$(LMR_BASE_REDUCTION)\""; fi; \
+	LMR_NIMP_ARG=""; if [[ -n "$(LMR_EXTRA_NON_IMPROVING)" ]]; then LMR_NIMP_ARG="--lmr-extra-non-improving \"$(LMR_EXTRA_NON_IMPROVING)\""; fi; \
+	if [[ -n "$(MOVETIME)" ]]; then \
+	  $(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --lmr-param-sweep --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --movetime "$(MOVETIME)" --timeout "$(or $(TIMEOUT),1800s)" $$LMR_IDX_ARG $$LMR_DEP_ARG $$LMR_BASE_ARG $$LMR_NIMP_ARG --lmp "$(or $(LMP),1)" --rfp "$(or $(RFP),1)" --report "$(or $(REPORT),tests/reports/lmr_param_sweep.txt)" --csv "$(or $(CSV),tests/reports/lmr_param_sweep.csv)"; \
+	else \
+	  $(LOG_RUN) "$$PYBIN" tests/tuning/lmr_lmp_rfp_scan.py --lmr-param-sweep --suite "$(or $(SUITE),tests/suites/external/arasan2026.epd)" --depths "$(or $(DEPTHS),6,8)" --timeout "$(or $(TIMEOUT),900s)" $$LMR_IDX_ARG $$LMR_DEP_ARG $$LMR_BASE_ARG $$LMR_NIMP_ARG --lmp "$(or $(LMP),1)" --rfp "$(or $(RFP),1)" --report "$(or $(REPORT),tests/reports/lmr_param_sweep.txt)" --csv "$(or $(CSV),tests/reports/lmr_param_sweep.csv)"; \
+	fi
+
 commands-log-tail:
 	@if [[ ! -f "$(COMMANDS_DEBUG_LOG)" ]]; then echo "log file not found: $(COMMANDS_DEBUG_LOG)"; exit 1; fi
 	tail -n $(or $(N),50) "$(COMMANDS_DEBUG_LOG)"
 
 ab-compare:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make ab-compare CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
-	$(LOG_RUN) "bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "CAND_THREADS=$(or $(CAND_THREADS),1) BASE_THREADS=$(or $(BASE_THREADS),1) bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
 
 ab-compare-report:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make ab-compare-report CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
-	$(LOG_RUN) "REPORT_TSV=tests/reports/ab_history.tsv REPORT_MD=tests/reports/ab_latest.md bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "CAND_THREADS=$(or $(CAND_THREADS),1) BASE_THREADS=$(or $(BASE_THREADS),1) REPORT_TSV=tests/reports/ab_history.tsv REPORT_MD=tests/reports/ab_latest.md bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
 
 ab-history:
 	$(LOG_RUN) "bash utils/ab_history_tail.sh tests/reports/ab_history.tsv $(or $(N),10)"
@@ -217,6 +238,18 @@ nightly-pipeline:
 sprt-ab:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make sprt-ab CANDIDATE=./candidate [BASELINE=./chess-static] [EXECUTE=1]"; exit 2; fi
 	$(LOG_RUN) "bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+thread-matrix-ab:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make thread-matrix-ab CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
+	$(LOG_RUN) "echo \"=== AB Threads 1 ===\"; CAND_THREADS=1 BASE_THREADS=1 BF_DEPTH=$(or $(BF_DEPTH),14) ARASAN_DEPTH=$(or $(ARASAN_DEPTH),6) bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "echo \"=== AB Threads 2 ===\"; CAND_THREADS=2 BASE_THREADS=2 BF_DEPTH=$(or $(BF_DEPTH),14) ARASAN_DEPTH=$(or $(ARASAN_DEPTH),6) bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "echo \"=== AB Threads 4 ===\"; CAND_THREADS=4 BASE_THREADS=4 BF_DEPTH=$(or $(BF_DEPTH),14) ARASAN_DEPTH=$(or $(ARASAN_DEPTH),6) bash utils/ab_compare.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+sprt-threads-matrix:
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make sprt-threads-matrix CANDIDATE=./candidate [BASELINE=./chess-static] [EXECUTE=1]"; exit 2; fi
+	$(LOG_RUN) "echo \"=== SPRT Threads 1 ===\"; RUN_TAG=$${RUN_TAG:-threads_1_$$(date +%Y%m%d_%H%M%S)} NEW_THREADS=1 BASE_THREADS=1 EXECUTE=$(or $(EXECUTE),0) bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "echo \"=== SPRT Threads 2 ===\"; RUN_TAG=$${RUN_TAG:-threads_2_$$(date +%Y%m%d_%H%M%S)} NEW_THREADS=2 BASE_THREADS=2 EXECUTE=$(or $(EXECUTE),0) bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	$(LOG_RUN) "echo \"=== SPRT Threads 4 ===\"; RUN_TAG=$${RUN_TAG:-threads_4_$$(date +%Y%m%d_%H%M%S)} NEW_THREADS=4 BASE_THREADS=4 EXECUTE=$(or $(EXECUTE),0) bash utils/sprt_ab_run.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
 
 review-pack:
 	bash utils/review_bundle.sh "$(or $(COMMIT),HEAD)"

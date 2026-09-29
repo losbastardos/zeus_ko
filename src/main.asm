@@ -179,7 +179,7 @@ extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit, pgn_result
 extern bench_fens, bench_fens_count
 extern bench_str_header, bench_str_nodes, bench_str_time, bench_str_nps
 extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
-extern key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file
+extern key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file, key_threads, default_threads
 extern lang_file_en, lang_file_sk
 extern lkey_menu_title, ldef_menu_title
 extern lkey_menu_select, ldef_menu_select
@@ -251,7 +251,7 @@ extern msg_view_black, msg_view_black_len
 extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmove, engine_side, uci_requested
 extern gfx_active_backend
 extern lang_is_en
-extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth
+extern uci_own_book, uci_stop_flag, uci_ponder, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
 extern tt_init, pst_init, book_pick_move, nnue_load, nnue2_load
 extern parse_fen_string, uci_now_ms
 extern nodes_searched
@@ -938,6 +938,7 @@ _start:
     mov dword [uci_hash_size], 64
     mov dword [uci_move_overhead], 100
     mov dword [uci_syzygy_probe_depth], 1
+    mov dword [uci_threads], 1
     mov rdi, 64
     call tt_init
     call pst_init
@@ -1055,6 +1056,22 @@ _start:
     jz .eval_done
     mov byte [eval_mode], 0    ; fallback classic pri chybe siete
 .eval_done:
+
+    ; pocet threadov (P2 scaffold pre Lazy SMP): clamp 1..8
+    lea rdi, [key_threads]
+    lea rsi, [default_threads]
+    call config_get
+    mov rsi, rax
+    call parse_int
+    cmp rax, 1
+    jge .threads_min_ok
+    mov rax, 1
+.threads_min_ok:
+    cmp rax, 8
+    jle .threads_store
+    mov rax, 8
+.threads_store:
+    mov [uci_threads], eax
 
     cmp byte [uci_requested], 0
     jne .do_uci             ; --uci na cmdline: menu sa preskoci
