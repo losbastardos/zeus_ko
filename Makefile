@@ -10,7 +10,7 @@ TARGET_STATIC = chess-static
 SRCDIR      = src
 OBJDIR      = obj
 
-SRCS        = main.asm board.asm move.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm tb.asm bb.asm nnue.asm uci.asm smp.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
+SRCS        = main.asm board.asm move.asm position.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm tb.asm bb.asm nnue.asm uci.asm smp.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
 
 SRCS_STATIC = $(filter-out gfx/sdl.asm,$(SRCS)) gfx/sdl_stub.asm
 
@@ -66,7 +66,8 @@ $(OBJDIR)/tb.o: $(SRCDIR)/tb/core_io.asm $(SRCDIR)/tb/pairs_decode.asm $(SRCDIR)
 	$(SRCDIR)/tb/probe/path_helpers.asm $(SRCDIR)/tb/probe/init_load.asm \
 	$(SRCDIR)/tb/probe/wdl_probe.asm $(SRCDIR)/tb/probe/dtz_probe.asm $(SRCDIR)/tb/probe/piece_count.asm
 
-$(OBJDIR)/bb.o: $(SRCDIR)/bitboard_tables.inc
+# position.asm includuje generovane magics.inc a lookup tabulky
+$(OBJDIR)/position.o: $(SRCDIR)/magics.inc $(SRCDIR)/bitboard_tables.inc
 
 clean:
 	rm -rf $(OBJDIR) $(TARGET) $(TARGET_STATIC)

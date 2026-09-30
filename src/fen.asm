@@ -20,6 +20,7 @@ extern piece_chars
 extern compute_hash, init_hash_history, record_hash
 extern parse_int
 extern inc_eval_valid
+extern pos_bb_init
 
 ; ============================================================
 ; fen_piece_char_to_byte - prevedie znak FEN figúrky na bajt
@@ -292,6 +293,7 @@ parse_fen_string:
     mov [fullmove], ax
 
     ; hash & history
+    call pos_bb_init               ; E10/F1: bb stav konzistentny s board
     call compute_hash
     call init_hash_history
     call record_hash

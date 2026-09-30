@@ -172,6 +172,7 @@ section .text
 global _start
 
 extern init_board, print_title, print_board, print_prompt, print_newline
+extern pos_magics_init
 extern read_move, print_move_list
 extern generate_all_moves, parse_user_move, find_move, apply_move
 extern update_position_state
@@ -944,6 +945,7 @@ _start:
     mov byte [uci_requested], 1
 .no_uci_arg:
     call init_board
+    call pos_magics_init           ; E10/F1: naplnenie magic_attacks (raz)
     call init_hash_history
     call record_hash
     call clear_history

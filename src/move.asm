@@ -17,6 +17,7 @@ global parse_user_move, find_move, apply_move
 
 extern board, side, move_buf, move_list, move_count
 extern promo_pieces, moved_piece, captured_piece
+extern pos_bb_init
 
 ; ============================================================
 ; parse_user_move - prevedie move_buf[0..3] na from | (to << 6)
@@ -215,6 +216,8 @@ apply_move:
     mov byte [rsi + 56], EMPTY
 
 .done:
+    ; E10/F1 invariant: bb stav konzistentny s board[64] po kazdej zmene
+    call pos_bb_init
     pop rsi
     pop r14
     pop r13

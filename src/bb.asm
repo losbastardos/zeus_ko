@@ -1,9 +1,10 @@
 ; ============================================================
 ; bb.asm - bitboard scaffold (P3 priprava)
 ;
-; Ciel: rychly is_square_attacked cez bitboardy namiesto mailbox
-; scanu. Scaffold faza = data struktury + attack query + validacny
-; harness (bbtest). Integracia je zapnuta v legal filter hot-path.
+; POZNAMKA E10/F1: bitboard stav (bb_pieces/bb_side/bb_occ) a
+; attack query zili do position.asm. Tento modul drzi uz len
+; kompatibilne aliasy (bb_sync -> pos_bb_init, bb_is_square_attacked
+; -> is_square_attacked_bb) a validacny harness (bbtest).
 ;
 ; Konvencia zhodna s legal.asm:
 ;   is_square_attacked(rax=sq, rbx=side 0/1) -> rax=1 ak super napada
@@ -14,248 +15,28 @@
 ; ============================================================
 
 %include "chess.inc"
-%include "bitboard_tables.inc"
 
 DEFAULT REL
-
-%define BB_FILE_A 0x0101010101010101
-%define BB_FILE_H 0x8080808080808080
-
-section .bss
-global bb_pieces, bb_side, bb_occ
-bb_pieces:  resq 12          ; [color_idx*6 + typ-1]
-bb_side:    resq 2           ; 0 = biela occupancy, 1 = cierna
-bb_occ:     resq 1           ; celkova occupancy
 
 section .text
 global bb_sync, bb_is_square_attacked, bb_validate_position, bb_debug_mismatch
 extern board, is_square_attacked, write_cstr, print_number, print_newline
+extern bb_pieces, bb_side, bb_occ
+extern pos_bb_init, is_square_attacked_bb
 
 ; ============================================================
-; bb_sync - prelozi board[64] do bitboardov
+; bb_sync - prelozi board[64] do bitboardov (alias za pos_bb_init)
 ; ============================================================
 bb_sync:
-    push rbx
-    push r12
-    lea rbx, [board]
-    lea rdi, [bb_pieces]
-    xor eax, eax
-    mov rcx, 15                  ; bb_pieces(12) + bb_side(2) + bb_occ(1), contiguous
-    rep stosq
-    xor r12, r12                 ; sq 0..63
-.loop:
-    cmp r12, 64
-    jae .done
-    movzx eax, byte [rbx + r12]
-    test eax, eax
-    jz .next
-    ; color_idx = (piece & 8) >> 3  ->  edx
-    mov edx, eax
-    and edx, COLOR_MASK
-    shr edx, 3
-    ; typ - 1 -> ecx
-    mov ecx, eax
-    and ecx, PIECE_MASK
-    dec ecx
-    ; slot = color_idx*6 + typ-1  ->  r8d
-    mov r8d, edx
-    imul r8d, r8d, 6
-    add r8d, ecx
-    ; bit = 1 << sq  ->  r9
-    mov r9, 1
-    mov ecx, r12d
-    shl r9, cl
-    ; bb_pieces[slot] |= bit
-    lea rdi, [bb_pieces]
-    mov ecx, r8d
-    or [rdi + rcx*8], r9
-    ; bb_side[color_idx] |= bit
-    lea rdi, [bb_side]
-    mov ecx, edx
-    or [rdi + rcx*8], r9
-    ; bb_occ |= bit
-    lea rdi, [bb_occ]
-    or [rdi], r9
-.next:
-    inc r12
-    jmp .loop
-.done:
-    pop r12
-    pop rbx
-    ret
+    jmp pos_bb_init
 
 ; ============================================================
-; bb_is_square_attacked - bitboard verzia
-; Vstup:  rax = policko (0..63), rbx = strana (0/8) ktorej kral tam stoji
+; bb_is_square_attacked - bitboard verzia (alias za is_square_attacked_bb)
+; Vstup:  rax = policko (0..63), rbx = strana (0/1) ktorej kral tam stoji
 ; Vystup: rax = 1 ak je policko napadnute superom, inak 0
-; Pozor: pred volanim treba bb_sync (bitboardy musia byt aktualne)
 ; ============================================================
 bb_is_square_attacked:
-    push rbx
-    push r12
-    push r13
-    push r14
-    push r15
-    mov r12, rax                 ; sq
-    mov r13d, ebx                ; side: 0 = biely, 1 = cierny (ako [side])
-    xor r13d, 1                  ; enemy_idx
-    imul r13d, r13d, 6           ; enemy base slot
-    mov r14, 1
-    mov ecx, r12d
-    shl r14, cl                  ; test bit = 1<<sq
-    lea r15, [bb_pieces]
-
-    ; --- pesiaci ---
-    mov rax, [r15 + r13*8]
-    test r13d, r13d
-    jnz .black_pawns
-    mov rdx, rax                 ; biele: (bb<<7 & ~FILE_H) | (bb<<9 & ~FILE_A)
-    shl rdx, 7
-    mov rcx, ~BB_FILE_H
-    and rdx, rcx
-    shl rax, 9
-    mov rcx, ~BB_FILE_A
-    and rax, rcx
-    or rax, rdx
-    jmp .pawn_test
-.black_pawns:                    ; cierne: (bb>>9 & ~FILE_H) | (bb>>7 & ~FILE_A)
-    mov rdx, rax
-    shr rdx, 9
-    mov rcx, ~BB_FILE_H
-    and rdx, rcx
-    shr rax, 7
-    mov rcx, ~BB_FILE_A
-    and rax, rcx
-    or rax, rdx
-.pawn_test:
-    test rax, r14
-    jnz .attacked
-
-    ; --- jazdci ---
-    lea rax, [bb_knight_attacks]
-    mov rcx, r12
-    mov rax, [rax + rcx*8]
-    lea rcx, [r13 + 1]
-    and rax, [r15 + rcx*8]
-    jnz .attacked
-
-    ; --- kral ---
-    lea rax, [bb_king_attacks]
-    mov rcx, r12
-    mov rax, [rax + rcx*8]
-    lea rcx, [r13 + 5]
-    and rax, [r15 + rcx*8]
-    jnz .attacked
-
-    ; --- strelci + damy (diagonaly) -> r8 ---
-    lea rcx, [r13 + 2]
-    mov r8, [r15 + rcx*8]
-    lea rcx, [r13 + 4]
-    or r8, [r15 + rcx*8]
-    ; --- veze + damy (ortogonalne) -> r9 ---
-    lea rcx, [r13 + 3]
-    mov r9, [r15 + rcx*8]
-    lea rcx, [r13 + 4]
-    or r9, [r15 + rcx*8]
-    ; occupancy -> r10
-    lea rcx, [bb_occ]
-    mov r10, [rcx]
-
-    ; --- ortogonalne smery cez ray+btscan ---
-    ; N (rastuce indexy): najblizsi blocker = bsf
-    lea rcx, [bb_ray_n]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .rook_e
-    bsf rcx, rax
-    bt r9, rcx
-    jc .attacked
-
-.rook_e:
-    ; E (rastuce indexy): najblizsi blocker = bsf
-    lea rcx, [bb_ray_e]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .rook_s
-    bsf rcx, rax
-    bt r9, rcx
-    jc .attacked
-
-.rook_s:
-    ; S (klesajuce indexy): najblizsi blocker = bsr
-    lea rcx, [bb_ray_s]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .rook_w
-    bsr rcx, rax
-    bt r9, rcx
-    jc .attacked
-
-.rook_w:
-    ; W (klesajuce indexy): najblizsi blocker = bsr
-    lea rcx, [bb_ray_w]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .diag_ne
-    bsr rcx, rax
-    bt r9, rcx
-    jc .attacked
-
-    ; --- diagonalne smery cez ray+btscan ---
-    ; NE (rastuce indexy): najblizsi blocker = bsf
-.diag_ne:
-    lea rcx, [bb_ray_ne]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .diag_nw
-    bsf rcx, rax
-    bt r8, rcx
-    jc .attacked
-
-.diag_nw:
-    ; NW (rastuce indexy): najblizsi blocker = bsf
-    lea rcx, [bb_ray_nw]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .diag_se
-    bsf rcx, rax
-    bt r8, rcx
-    jc .attacked
-
-.diag_se:
-    ; SE (klesajuce indexy): najblizsi blocker = bsr
-    lea rcx, [bb_ray_se]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .diag_sw
-    bsr rcx, rax
-    bt r8, rcx
-    jc .attacked
-
-.diag_sw:
-    ; SW (klesajuce indexy): najblizsi blocker = bsr
-    lea rcx, [bb_ray_sw]
-    mov rax, [rcx + r12*8]
-    and rax, r10
-    jz .not_attacked
-    bsr rcx, rax
-    bt r8, rcx
-    jc .attacked
-    jmp .not_attacked
-
-.attacked:
-    mov rax, 1
-    jmp .ret
-.not_attacked:
-    xor rax, rax
-.ret:
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rbx
-    ret
-
+    jmp is_square_attacked_bb
 ; ============================================================
 ; bb_validate_position - porovna mailbox vs bitboard pre celu poziciu
 ; Vystup: rax = pocet nesuhladov (0 = OK)

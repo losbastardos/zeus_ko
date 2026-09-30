@@ -115,6 +115,7 @@ extern pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 extern nodes_searched, search_last_score
 extern search_limits, uci_stop_flag
 extern apply_move, update_position_state
+extern pos_bb_init
 extern generate_all_moves, is_in_check, evaluate
 extern inc_eval_valid, inc_mg, inc_eg, inc_phase, inc_bish_w, inc_bish_b, inc_wking, inc_bking
 extern inc_pawn_dirty, inc_pawn_score, inc_mask_w, inc_mask_b, inc_pawn_files, inc_passed_clean
@@ -847,6 +848,8 @@ unmake_move:
     mov byte [rsi + 59], EMPTY
 
 .done:
+    ; E10/F1 invariant: bb stav konzistentny s obnovenym board[64]
+    call pos_bb_init
     ; prepocitaj hash obnovenej pozicie (vzdy, na vsetkych cestach)
     ; pozor: telo unmake_move prepisalo rax, povodna hodnota je na stacku
     call compute_hash

@@ -51,6 +51,7 @@ extern board, side, castle, enpassant, halfmove, fullmove, board_flip
 extern moved_piece, captured_piece
 extern piece_chars, initial_board
 extern compute_hash
+extern pos_bb_init
 extern inc_eval_valid
 extern msg_files, msg_files_len, msg_files_rev, msg_files_rev_len, msg_newline
 extern rank_char_buf, square_char_buf
@@ -129,6 +130,7 @@ init_board:
     mov word [fullmove], 1
     mov byte [board_flip], 0
     mov byte [inc_eval_valid], 0   ; invalidacia inkrementalneho eval cache
+    call pos_bb_init               ; E10/F1: bb stav konzistentny s board
     call compute_hash
     ret
 
