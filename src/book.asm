@@ -12,6 +12,13 @@
 
 DEFAULT REL
 
+section .rodata
+
+book_warn_pfx: db 10, "Book: failed to load '"
+book_warn_pfx_len equ $ - book_warn_pfx
+book_warn_sfx: db "' (book disabled)", 10, 10
+book_warn_sfx_len equ $ - book_warn_sfx
+
 section .text
 
 global book_load_all, book_lookup
@@ -203,8 +210,35 @@ book_load_all:
     mov rdi, rsp
     call book_load_one
     test rax, rax
-    jz .skip_load
+    jz .warn_missing
+    jmp .load_ok
 
+.warn_missing:
+    ; konfigurovany book sa nepodarilo otvorit -> varovanie (inak ticho)
+    mov rax, 1              ; SYS_write
+    mov rdi, 1              ; STDOUT
+    lea rsi, [book_warn_pfx]
+    mov rdx, book_warn_pfx_len
+    syscall
+    mov rax, 1
+    mov rdi, 1
+    mov rsi, rsp            ; nazov suboru v stack bufferi (NUL-terminated)
+    xor rdx, rdx
+.warn_len:
+    cmp byte [rsi + rdx], 0
+    je .warn_len_done
+    inc rdx
+    jmp .warn_len
+.warn_len_done:
+    syscall
+    mov rax, 1
+    mov rdi, 1
+    lea rsi, [book_warn_sfx]
+    mov rdx, book_warn_sfx_len
+    syscall
+    jmp .skip_load
+
+.load_ok:
     cmp r14, MAX_BOOKS
     jge .skip_load
 
