@@ -195,8 +195,9 @@ extern bench_str_p_makes, bench_str_p_unmakes
 extern bench_str_bench_line, bench_str_time_ms, bench_str_nps_eq, bench_str_depth_eq
 extern bench_str_pct, bench_str_pct_end
 extern book_rating_flag
-extern config_filename, key_book, default_book, key_search_depth, default_search_depth, key_debug, default_debug
+extern config_filename, key_book, default_book, key_eco, default_eco, key_search_depth, default_search_depth, key_debug, default_debug
 extern key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file, key_threads, default_threads
+extern eco_load, eco_test_print
 extern lang_file_en, lang_file_sk
 extern lkey_menu_title, ldef_menu_title
 extern lkey_menu_select, ldef_menu_select
@@ -972,6 +973,13 @@ _start:
     mov rdi, rax
     call book_load_all
 
+    ; nacitaj opening kniznicu ECO kodov (eco.bin; chyba = tiche vypnutie)
+    lea rdi, [key_eco]
+    lea rsi, [default_eco]
+    call config_get
+    mov rdi, rax
+    call eco_load
+
     ; language: en/sk
     lea rdi, [key_language]
     lea rsi, [default_language]
@@ -1206,6 +1214,8 @@ _start:
     je .check_t_cmd
     cmp al, 'b'
     je .check_b_cmd
+    cmp al, 'e'
+    je .check_e_cmd
 
 .try_move:
     call parse_user_move
@@ -1549,6 +1559,24 @@ _start:
     cmp byte [move_buf+5], 't'
     jne .do_text
     jmp .do_bbtest
+
+.check_e_cmd:
+    cmp qword [move_buf_len], 7
+    jne .try_move
+    cmp byte [move_buf+1], 'c'
+    jne .try_move
+    cmp byte [move_buf+2], 'o'
+    jne .try_move
+    cmp byte [move_buf+3], 't'
+    jne .try_move
+    cmp byte [move_buf+4], 'e'
+    jne .try_move
+    cmp byte [move_buf+5], 's'
+    jne .try_move
+    cmp byte [move_buf+6], 't'
+    jne .try_move
+    call eco_test_print
+    jmp .game_loop
 
 .do_bbtest:
     call pos_validate

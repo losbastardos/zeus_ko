@@ -59,13 +59,18 @@ class Zobrist:
     def hash(self, board, ep_file):
         h = 0
         for sq, piece in board.piece_map().items():
-            bajt = piece.piece_type | (piece.color << 3)  # WHITE=0, BLACK=8
+            # engine konvencia: biela figura = typ (1..6), cierna = typ|8
+            bajt = piece.piece_type | (8 if piece.color == chess.BLACK else 0)
             h ^= self.keys[((bajt & 0xF) << 6) | sq]
         if board.turn == chess.BLACK:
             h ^= self.keys[1024]
-        rights = board.castling_rights  # bity zhodne s engine (H1=1, A1=2, H8=4, A8=8)
-        for bit in range(4):
-            if rights & (1 << bit):
+        # python-chess >= 1.0: castling_rights = bitmask rokovych policok
+        # (BB_H1, BB_A1, BB_H8, BB_A8); engine bity: 0=W O-O, 1=W O-O-O,
+        # 2=B O-O, 3=B O-O-O
+        rights = board.castling_rights
+        for rook_sq, bit in ((chess.BB_H1, 0), (chess.BB_A1, 1),
+                             (chess.BB_H8, 2), (chess.BB_A8, 3)):
+            if rights & rook_sq:
                 h ^= self.keys[1025 + bit]
         if ep_file is not None:
             h ^= self.keys[1029 + ep_file]

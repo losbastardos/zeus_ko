@@ -172,7 +172,7 @@ global captured_by_white, captured_by_white_len
 global captured_by_black, captured_by_black_len
 global book_moves, book_moves_len, pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 
-global book_filename, config_filename, key_book, default_book, key_search_depth, default_search_depth
+global book_filename, config_filename, key_book, default_book, key_eco, default_eco, key_search_depth, default_search_depth
 global key_language, default_language, key_syzygy, default_syzygy, key_book_mode, default_book_mode, key_book_search_depth, default_book_search_depth, key_eval_mode, default_eval_mode, key_nnue_file, default_nnue_file, key_threads, default_threads
 global lang_file_en, lang_file_sk
 
@@ -248,6 +248,12 @@ key_syzygy:
 
 default_book:
     db "book.book", 0
+
+key_eco:
+    db "eco", 0
+
+default_eco:
+    db "eco.bin", 0
 
 default_search_depth:
     db "3", 0

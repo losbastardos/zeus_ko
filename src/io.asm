@@ -192,6 +192,25 @@ read_move:
     jmp .done
 
 .check_exit:
+    ; special helper: ecotest
+    cmp r12, 7
+    jne .check_exit_len4
+    cmp byte [move_buf+1], 'c'
+    jne .validate_move
+    cmp byte [move_buf+2], 'o'
+    jne .validate_move
+    cmp byte [move_buf+3], 't'
+    jne .validate_move
+    cmp byte [move_buf+4], 'e'
+    jne .validate_move
+    cmp byte [move_buf+5], 's'
+    jne .validate_move
+    cmp byte [move_buf+6], 't'
+    jne .validate_move
+    xor rax, rax
+    jmp .done
+
+.check_exit_len4:
     cmp r12, 4
     jne .validate_move
     cmp byte [move_buf+1], 'x'

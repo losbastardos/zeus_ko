@@ -52,6 +52,7 @@ uci_unknown:
 uci_unknown_len equ $ - uci_unknown - 1
 
 uci_tbtest_prefix: db "info string tbtest pieces=", 0
+uci_eco_prefix: db "info string ", 0
 uci_tbtest_wdl:    db " wdl=", 0
 uci_tbtest_dtz:    db " dtz=", 0
 uci_tbtest_map:    db " map_bytes=", 0
@@ -220,6 +221,7 @@ extern tb_dec_trace_code_hex
 extern tb_dec_trace_nsteps, tb_dec_trace_steps
 extern tb_dec_stage_tmp
 extern suite_cmd_uci
+extern eco_test_print
 
 ; ============================================================
 ; write_str - vypise C-string na stdout
@@ -2369,6 +2371,14 @@ uci_loop:
     test rax, rax
     jnz .bbtest
 
+    ; 'ecotest' (non-standard helper: ECO kod + nazov otvorenia)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_ecotest]
+    call uci_str_eq
+    test rax, rax
+    jnz .ecotest
+
     ; 'list' (non-standard helper: legalne tahy aktualnej pozicie)
     mov rdi, r12
     mov rsi, rbx
@@ -2380,6 +2390,12 @@ uci_loop:
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
+    jmp .loop
+
+.ecotest:
+    lea rdi, [uci_eco_prefix]
+    call write_cstr
+    call eco_test_print
     jmp .loop
 
 .list:
@@ -2832,5 +2848,6 @@ uci_loop:
 .str_analyze: db "analyze", 0
 .str_suite:   db "suite", 0
 .str_tbtest:  db "tbtest", 0
+.str_ecotest: db "ecotest", 0
 .str_bbtest:  db "bbtest", 0
 .str_list:    db "list", 0

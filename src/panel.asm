@@ -31,6 +31,8 @@ global panel_empty
 
 panel_empty:     db 0
 
+panel_eco_label: db "ECO: ", 0
+
 msg_status_white: db 27,"[96mWHITE to move",27,"[0m", 0
 msg_status_white_len equ $ - msg_status_white - 1
 msg_status_black: db 27,"[96mBLACK to move",27,"[0m", 0
@@ -80,6 +82,7 @@ extern lang_txt_mode_engine_white, lang_txt_mode_engine_black, lang_txt_mode_bot
 extern lang_txt_panel_white_took, lang_txt_panel_black_took, lang_txt_panel_help_move, lang_txt_panel_help_flip, lang_txt_panel_help_help, lang_txt_panel_help_summary
 extern piece_chars
 extern print_newline, square_to_str, write_cstr, square_str_buf
+extern eco_lookup, eco_ready, eco_code, eco_name_ptr, eco_name_len
 
 ; ============================================================
 ; print_pad - vypise PANEL_PAD medzier
@@ -501,6 +504,8 @@ print_panel_line:
     je .book
     cmp rdi, 11
     je .pvline
+    cmp rdi, 12
+    je .eco
     jmp .blank
 
 .border:
@@ -557,6 +562,11 @@ print_panel_line:
     jmp .done
 .pvline:
     call build_pv_line
+    call print_panel_buffer_line
+    jmp .done
+
+.eco:
+    call build_eco_line
     call print_panel_buffer_line
     jmp .done
 
@@ -788,6 +798,57 @@ book_lookup_all:
     pop rsi
     pop rdx
     pop rcx
+    pop rbx
+    pop rax
+    ret
+
+; ============================================================
+; build_eco_line - vysklada riadok s ECO kodom a nazvom otvorenia
+; (prazdny riadok ak eco.bin nie je nacitany alebo pozicia nie je v kniznici)
+; ============================================================
+build_eco_line:
+    push rax
+    push rbx
+    push rsi
+
+    call panel_buf_clear
+
+    cmp byte [eco_ready], 0
+    je .done
+
+    call eco_lookup
+    test eax, eax
+    jz .done
+
+    lea rsi, [panel_eco_label]
+    call panel_buf_append_cstr
+
+    ; ECO kod (max 3 znaky, v eco_code je NUL-term)
+    lea rbx, [eco_code]
+    mov al, [rbx]
+    call panel_buf_append_char
+    mov al, [rbx + 1]
+    call panel_buf_append_char
+    mov al, [rbx + 2]
+    call panel_buf_append_char
+
+    mov al, ' '
+    call panel_buf_append_char
+
+    ; nazov: raw bajty (UTF-8) s orezanim na sirku panelu
+    mov rsi, [eco_name_ptr]
+    mov rbx, [eco_name_len]
+    test rbx, rbx
+    jz .done
+.name_loop:
+    mov al, [rsi]
+    call panel_buf_append_char
+    inc rsi
+    dec rbx
+    jnz .name_loop
+
+.done:
+    pop rsi
     pop rbx
     pop rax
     ret

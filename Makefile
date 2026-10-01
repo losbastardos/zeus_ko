@@ -10,7 +10,7 @@ TARGET_STATIC = chess-static
 SRCDIR      = src
 OBJDIR      = obj
 
-SRCS        = main.asm board.asm move.asm position.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm tb.asm nnue.asm uci.asm smp.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
+SRCS        = main.asm board.asm move.asm position.asm movegen.asm legal.asm io.asm data.asm eval.asm search.asm see.asm hash.asm tt.asm book.asm eco.asm tb.asm nnue.asm uci.asm smp.asm panel.asm fen.asm pgn.asm suite.asm gfx/config.asm gfx/gfx.asm gfx/mouse.asm gfx/sdl.asm
 
 SRCS_STATIC = $(filter-out gfx/sdl.asm,$(SRCS)) gfx/sdl_stub.asm
 
@@ -39,7 +39,7 @@ COMMANDS_DEBUG_LOG ?= commands_debug.log
 COMMANDS_DEBUG ?= $(shell awk -F= 'tolower($$1) ~ /^[[:space:]]*debug[[:space:]]*$$/ {v=tolower($$2); gsub(/[[:space:]]/,"",v); print (v ~ /^(1|true|yes|on)$$/ ? 1 : 0); found=1; exit} END {if (!found) print 0}' chess.ini 2>/dev/null)
 LOG_RUN = COMMANDS_DEBUG=$(COMMANDS_DEBUG) COMMANDS_DEBUG_LOG=$(COMMANDS_DEBUG_LOG) bash tests/tuning/command_debug_run.sh
 
-.PHONY: all clean run test bench-report strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan lmr-param-sweep commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab thread-matrix-ab sprt-threads-matrix rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings variant-static variant-rfp0 variant-lmr0 variant-lmp0 variant-null0
+.PHONY: all clean run test bench-report strength-gate roadmap-p0 roadmap-p0-record roadmap-p0-final texel-dataset texel-label texel-fit texel-split texel-pipeline texel-trial texel-batch pawn-hash-study bitboard-tables tb-smoke tb-smoke-matrix tb-verify-3piece syzygy-oracle tb-oracle-compare suite-depth-scan suite-repeat search-ablation-scan lmr-param-sweep commands-log-tail ab-compare ab-compare-report ab-history nightly-pipeline sprt-ab arasan-matchup thread-matrix-ab sprt-threads-matrix rtbz-variants syzygy-tools syzygy-3piece review-pack review-pack-nogate review-findings variant-static variant-rfp0 variant-lmr0 variant-lmp0 variant-null0
 
 all: $(TARGET) $(TARGET_STATIC)
 
@@ -236,8 +236,12 @@ variant-null0:
 	$(MAKE) variant-static OUT=chess-static-null0 DEFINES='-DENABLE_NULL_PRUNE=0'
 
 nightly-pipeline:
-	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make nightly-pipeline CANDIDATE=./candidate [BASELINE=./chess-static]"; exit 2; fi
-	$(LOG_RUN) "bash utils/nightly_pipeline.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make nightly-pipeline CANDIDATE=./candidate [BASELINE=./chess-static] [ARASAN_MATCHUP=1]"; exit 2; fi
+	$(LOG_RUN) "ARASAN_MATCHUP='$(or $(ARASAN_MATCHUP),0)' MATCHUP_GAMES='$(or $(MATCHUP_GAMES),100)' MATCHUP_TC='$(or $(MATCHUP_TC),10+0.1)' bash utils/nightly_pipeline.sh \"$(CANDIDATE)\" \"$(or $(BASELINE),./chess-static)\""
+
+# Pravidelne meranie sily: chess-static vs Arasan 26 (dlhe - default mimo nightly).
+arasan-matchup: $(TARGET_STATIC)
+	$(LOG_RUN) "bash utils/arasan_matchup.sh \"$(or $(GAMES),100)\" \"$(or $(TC),10+0.1)\""
 
 sprt-ab:
 	@if [ -z "$(CANDIDATE)" ]; then echo "Usage: make sprt-ab CANDIDATE=./candidate [BASELINE=./chess-static] [EXECUTE=1]"; exit 2; fi
