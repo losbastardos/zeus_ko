@@ -1234,25 +1234,25 @@ hash_delta_pieces:
     jmp .done
 .rwk:
     mov esi, 7
-    mov edi, 5
+    mov r12d, 5                  ; rto (r12=from uz nie je potrebne)
     jmp .rook
 .rwq:
     mov esi, 0
-    mov edi, 3
+    mov r12d, 3
     jmp .rook
 .rbk:
     mov esi, 63
-    mov edi, 61
+    mov r12d, 61
     jmp .rook
 .rbq:
     mov esi, 56
-    mov edi, 59
+    mov r12d, 59
 .rook:
     movzx ecx, byte [moved_piece]
     and ecx, COLOR_MASK
     or ecx, ROOK
     call hash_xor_piece          ; out rook @ rfrom
-    mov esi, edi
+    mov esi, r12d                ; r12 prezije (callee-saved), rdi nie
     call hash_xor_piece          ; in rook @ rto
 .done:
     add rsp, 8
