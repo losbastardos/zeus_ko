@@ -248,6 +248,7 @@ parse_fen_string:
 
 .no_castle:
     mov byte [castle], 0
+    inc rdi                     ; preskoc '-' token (inak by ho zral ep parser)
 .castle_done:
     mov r15, rdi
 

@@ -41,10 +41,13 @@ magic_attacks: resq MAGICS_TOTAL    ; bishop sekcia (5248) + rook (102400)
 section .text
 
 global pos_bb_init, pos_magics_init
+global pos_bb_move_delta, pos_validate
 global bb_attacks_bishop, bb_attacks_rook, bb_attacks_queen
 global is_square_attacked_bb
 
 extern board
+extern side
+extern promo_pieces
 
 ; ============================================================
 ; pos_bb_init - prelozi board[64] do bitboardov (plny re-sync)
@@ -451,6 +454,243 @@ is_square_attacked_bb:
 
 section .bss
 dbg_pm_cnt: resq 1
+section .text
+
+; ============================================================
+; pos_bb_move_delta - inkrementalna bitboard delta tahu
+; Vstup:  eax = 16-bitovy tah, esi = moved_piece (figurka na from
+;         pred tahom), edi = captured_piece (0 ak nie je; pri EP
+;         pesiac supera), [side] = strana tahu (pri unmake uz
+;         obnovena na mover)
+; Vystup: bb_pieces/bb_side/bb_occ xor delta; board[64] NEMENI
+; Pouzitie: apply_move (move.asm) a unmake_move (search.asm)
+; namiesto plneho pos_bb_init re-syncu. XOR delta je samoinverzna.
+; Nici: rax, rcx, rdx, rsi, rdi, r8-r11 (callee-saved zachovane)
+; ============================================================
+pos_bb_move_delta:
+    push rbx
+    push rbp
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r13d, esi               ; moved_piece
+    mov r14d, edi               ; captured_piece
+    movzx r15d, byte [side]
+    movzx ebp, ax
+    and ebp, 0x3F               ; from
+    movzx r12d, ax
+    shr r12d, 6
+    and r12d, 0x3F              ; to
+    shr eax, 12
+    mov r8d, eax                ; flags
+    mov ecx, ebp
+    mov rbx, 1
+    shl rbx, cl                 ; fbit = 1<<from
+    mov ecx, r12d
+    mov eax, 1
+    shl rax, cl                 ; tbit = 1<<to (rax; 64-bit shl, cl 0..63)
+
+    cmp r8d, FLAG_ENPASSANT
+    je .ep
+    cmp r8d, FLAG_CASTLE
+    je .castle
+    cmp r8d, FLAG_PROMO_Q
+    jb .normal
+    cmp r8d, FLAG_PROMO_N
+    jbe .promo
+
+; ---------- normalny tah (aj s capture) ----------
+.normal:
+    mov ecx, r13d
+    and ecx, PIECE_MASK
+    dec ecx
+    mov edx, r15d
+    imul edx, edx, 6
+    add ecx, edx
+    lea rdi, [bb_pieces]
+    xor [rdi + rcx*8], rbx      ; vlastny slot: -fbit
+    xor [rdi + rcx*8], rax      ;                +tbit
+    jmp .common
+
+; ---------- promocia ----------
+.promo:
+    lea rdi, [bb_pieces]
+    mov edx, r15d
+    imul edx, edx, 6
+    xor [rdi + rdx*8], rbx      ; pesiac odchadza z from
+    lea rdi, [promo_pieces]
+    movzx ecx, byte [rdi + r8]  ; promo typ
+    dec ecx
+    mov edx, r15d
+    imul edx, edx, 6
+    add ecx, edx
+    lea rdi, [bb_pieces]
+    xor [rdi + rcx*8], rax      ; promo figurka na to
+    jmp .common
+
+; ---------- spolocny tail: bb_side + bb_occ + capture ----------
+.common:
+    movzx edx, byte [side]
+    lea rdi, [bb_side]
+    xor [rdi + rdx*8], rbx
+    xor [rdi + rdx*8], rax
+    lea rdi, [bb_occ]
+    xor [rdi], rbx              ; from sa vzdy uvofnuje/zaseda
+    test r14b, r14b
+    jnz .cap
+    xor [rdi], rax              ; bez capture: to sa meni
+    jmp .done
+.cap:
+    ; to zostava obsadene (zmena vlastnika) - occ bez zmeny
+    mov ecx, r14d
+    and ecx, PIECE_MASK
+    dec ecx
+    mov edx, r15d
+    xor edx, 1
+    imul edx, edx, 6
+    add ecx, edx
+    lea rdi, [bb_pieces]
+    xor [rdi + rcx*8], rax      ; zajata figurka prec z to
+    movzx edx, byte [side]
+    xor edx, 1
+    lea rdi, [bb_side]
+    xor [rdi + rdx*8], rax
+    jmp .done
+
+; ---------- en passant ----------
+; brany pesiac stoji na to-8 (biely) / to+8 (cierny)
+.ep:
+    mov ecx, r12d
+    cmp byte [side], 0
+    jne .ep_blk
+    sub ecx, 8
+    jmp .ep_bit
+.ep_blk:
+    add ecx, 8
+.ep_bit:
+    mov edx, 1
+    shl rdx, cl                 ; epbit (64-bit shl, cl 0..63)
+    lea rdi, [bb_pieces]
+    mov esi, r15d
+    imul esi, esi, 6
+    mov rcx, rbx
+    xor rcx, rax                ; fbit^tbit
+    xor [rdi + rsi*8], rcx      ; vlastny pesiak: from->to
+    mov esi, r15d
+    xor esi, 1
+    imul esi, esi, 6
+    xor [rdi + rsi*8], rdx      ; superov pesiak prec
+    movzx esi, byte [side]
+    lea rdi, [bb_side]
+    xor [rdi + rsi*8], rcx
+    movzx esi, byte [side]
+    xor esi, 1
+    xor [rdi + rsi*8], rdx
+    xor rcx, rdx
+    lea rdi, [bb_occ]
+    xor [rdi], rcx
+    jmp .done
+
+; ---------- rosada ----------
+; kral fbit->tbit; veza podla ciela: WK 7->5, WQ 0->3, BK 63->61, BQ 56->59
+.castle:
+    mov rsi, rbx
+    xor rsi, rax                ; kralovska delta fbit^tbit
+    lea rdi, [bb_pieces]
+    mov edx, r15d
+    imul edx, edx, 6
+    xor [rdi + rdx*8 + 40], rsi ; kral slot (base+5)
+    cmp r12d, 6
+    je .c_wk
+    cmp r12d, 2
+    je .c_wq
+    cmp r12d, 62
+    je .c_bk
+    mov ecx, 56                 ; BQ: veza 56->59
+    mov edx, 59
+    jmp .c_rook
+.c_wk:
+    mov ecx, 7
+    mov edx, 5
+    jmp .c_rook
+.c_wq:
+    mov ecx, 0
+    mov edx, 3
+    jmp .c_rook
+.c_bk:
+    mov ecx, 63
+    mov edx, 61
+.c_rook:
+    mov rax, 1
+    shl rax, cl                 ; rfbit
+    mov ecx, edx
+    mov rdx, 1
+    shl rdx, cl                 ; rtbit
+    xor rax, rdx                ; delta veze
+    lea rdi, [bb_pieces]
+    mov ecx, r15d
+    imul ecx, ecx, 6
+    xor [rdi + rcx*8 + 24], rax ; veza slot (base+3)
+    xor rsi, rax                ; celkova delta kral+veza
+    movzx edx, byte [side]
+    lea rdi, [bb_side]
+    xor [rdi + rdx*8], rsi
+    lea rdi, [bb_occ]
+    xor [rdi], rsi
+.done:
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
+    ret
+
+; ============================================================
+; pos_validate - bbtest harness (F3): porovna priamy bb stav
+; s mailbox-derived (pos_bb_init). Priamy stav sa ulozi, prepocta
+; sa z board[64] a porovna sa; potom sa priamy stav obnovi.
+; Vystup: rax = pocet mismatchov (0 = OK)
+; ============================================================
+pos_validate:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 128
+    lea rsi, [bb_pieces]
+    mov rdi, rsp
+    mov ecx, 15                 ; bb_pieces(12) + bb_side(2) + bb_occ(1)
+    rep movsq
+    call pos_bb_init
+    xor eax, eax
+    xor ecx, ecx
+.cmp_loop:
+    cmp ecx, 15
+    jae .fin
+    mov rdx, [rsp + rcx*8]
+    lea rdi, [bb_pieces]
+    cmp rdx, [rdi + rcx*8]
+    je .ok
+    inc rax
+.ok:
+    inc ecx
+    jmp .cmp_loop
+.fin:
+    lea rdi, [bb_pieces]
+    mov rsi, rsp
+    mov ecx, 15
+    rep movsq
+    add rsp, 128
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
 section .rodata
 %ifdef POS_MAGICS_DEBUG
 extern write_cstr, print_number, print_newline
@@ -472,3 +712,4 @@ bb_dirs_rook:
     dq 0x0000000100000000        ; ( 0, +1)
     dq 0xFFFFFFFF00000000        ; ( 0, -1)
 section .text
+

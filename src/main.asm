@@ -274,7 +274,7 @@ extern parse_fen_string, uci_now_ms
 extern nodes_searched
 extern suite_cmd_text, suite_snapshot_save, suite_snapshot_restore
 extern tb_init, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path
-extern bb_validate_position, bb_debug_mismatch
+extern pos_validate
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 extern tb_wdl_payload_probe_off, tb_dtz_payload_probe_off
 extern tb_wdl_header_flags, tb_dtz_header_flags
@@ -1551,7 +1551,7 @@ _start:
     jmp .do_bbtest
 
 .do_bbtest:
-    call bb_validate_position
+    call pos_validate
     mov r12, rax
     lea rdi, [bbtest_prefix]
     call write_cstr

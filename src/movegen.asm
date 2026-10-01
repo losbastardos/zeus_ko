@@ -4,22 +4,40 @@
 ; ============================================================
 
 ; ============================================================
-; movegen.asm - generator pseudo-legálnych tahov
+; movegen.asm - generator pseudo-legálnych tahov (E10/F3)
+;
+; Plne bitboard generovanie: ziadny mailbox scan, ziaden sync.
+; Invariant F3: bb_pieces/bb_side/bb_occ je konzistentny s
+; board[64] (udržiava apply_move/unmake_move inkrementalnou xor
+; deltou, init/FEN cesty cez pos_bb_init).
+;   - pesiaci: posuny/captury cez shift masky + rank/file masky
+;   - jazdec/kral: lookup tabulky & ~own_occ
+;   - slidery: magic bitboardy (bb_attacks_* s rdx=bb_occ)
+; filter_legal_moves robi pure-bit apply/revert + attack query.
 ; ============================================================
 
 %include "chess.inc"
 
 DEFAULT REL
 
+%define BB_RANK_1       0x00000000000000FF
+%define BB_RANK_4       0x00000000FF000000
+%define BB_RANK_5       0x000000FF00000000
+%define BB_RANK_8       0xFF00000000000000
+%define BB_NOT_FILE_A   0xFEFEFEFEFEFEFEFE
+%define BB_NOT_FILE_H   0x7F7F7F7F7F7F7F7F
+
 section .text
 
 global generate_all_moves
 
 extern board, side, castle, enpassant, move_list, move_count
-extern knight_offsets, bishop_dirs, rook_dirs, king_dirs
-extern print_number, print_newline
 extern filter_legal_moves
 extern prof_movegen
+extern bb_pieces, bb_side, bb_occ
+extern bb_knight_attacks, bb_king_attacks
+extern bb_attacks_bishop, bb_attacks_rook
+extern promo_pieces
 
 ; ============================================================
 ; add_move - prida tah do move_list
@@ -53,73 +71,66 @@ add_move:
     ret
 
 ; ============================================================
-; get_piece_type / get_piece_color
+; bb_mask_own - rax = maska ~own_occ (vyluc vlastne figury)
 ; ============================================================
-get_piece_type:
-    lea rdi, [board]
-    movzx rax, byte [rdi + rax]
-    and rax, PIECE_MASK
-    ret
-
-get_piece_color:
-    lea rdi, [board]
-    movzx rax, byte [rdi + rax]
-    and rax, COLOR_MASK
+bb_mask_own:
+    movzx eax, byte [side]
+    lea rcx, [bb_side]
+    mov rax, [rcx + rax*8]
+    not rax
     ret
 
 ; ============================================================
-; is_square_empty / is_enemy_piece / is_own_piece
+; bb_emit_targets - prida vsetky tahy r12 -> bit v r15
+; Nici r13, r14 (flags=0), r15; add_move nici r13 (bit z r15).
 ; ============================================================
-is_square_empty:
-    lea rdi, [board]
-    movzx rax, byte [rdi + rax]
-    test rax, rax
-    setz al
-    movzx rax, al
-    ret
-
-is_enemy_piece:
-    push rbx
-    lea rdi, [board]
-    movzx rbx, byte [rdi + rax]
-    test rbx, rbx
-    jz .no
-    movzx rax, byte [side]
-    shl rax, 3
-    xor rbx, rax
-    test rbx, COLOR_MASK
-    jnz .yes
-.no:
-    xor rax, rax
-    pop rbx
-    ret
-.yes:
-    mov rax, 1
-    pop rbx
-    ret
-
-is_own_piece:
-    push rbx
-    lea rdi, [board]
-    movzx rbx, byte [rdi + rax]
-    test rbx, rbx
-    jz .no
-    movzx rax, byte [side]
-    shl rax, 3
-    xor rbx, rax
-    test rbx, COLOR_MASK
-    jz .yes
-.no:
-    xor rax, rax
-    pop rbx
-    ret
-.yes:
-    mov rax, 1
-    pop rbx
+bb_emit_targets:
+    test r15, r15
+    jz .done
+    bsf r13, r15
+    btr r15, r13
+    xor r14d, r14d              ; FLAG_NORMAL
+    call add_move
+    jmp bb_emit_targets
+.done:
     ret
 
 ; ============================================================
-; generate_all_moves
+; bb_emit_pawn_shift - pesiacie tahy s pevnym smerom
+; Vstup: r15 = cielova maska, r9b = delta (to - from), r14 = flags
+; ============================================================
+bb_emit_pawn_shift:
+    test r15, r15
+    jz .done
+    bsf r13, r15
+    btr r15, r13
+    mov r12d, r13d
+    sub r12d, r9d
+    xor r14d, r14d              ; FLAG_NORMAL
+    call add_move
+    jmp bb_emit_pawn_shift
+.done:
+    ret
+
+; ============================================================
+; bb_emit_promos - 4x add_move (FLAGY 1-4) pre kazdy ciel v r15
+; Vstup: r15 = cielova maska, r9b = delta (to - from)
+; Ghost-promo disciplina: ciel v rbx, add_all_promotions je bezpecna.
+; ============================================================
+bb_emit_promos:
+    test r15, r15
+    jz .done
+    bsf r13, r15
+    btr r15, r13
+    mov r12d, r13d
+    sub r12d, r9d
+    call add_all_promotions
+    jmp bb_emit_promos
+.done:
+    ret
+
+; ============================================================
+; generate_all_moves - bitboard rychlostna cesta (F3)
 ; ============================================================
 generate_all_moves:
     inc qword [prof_movegen]
@@ -129,265 +140,312 @@ generate_all_moves:
     push rdx
     push rsi
     push rdi
-
-    mov word [move_count], 0
-
-    xor rax, rax
-.square_loop:
-    lea rdi, [board]
-    movzx rbx, byte [rdi + rax]
-    test rbx, rbx
-    jz .next_square
-
-    mov r12, rax
-    call is_own_piece
-    mov rbx, rax            ; uloz vysledok is_own_piece
-    mov rax, r12            ; obnov cislo policka
-    test rbx, rbx
-    jz .next_square
-
-    movzx rbx, byte [rdi + rax]
-    and rbx, PIECE_MASK
-    cmp rbx, PAWN
-    je .gen_pawn
-    cmp rbx, KNIGHT
-    je .gen_knight
-    cmp rbx, BISHOP
-    je .gen_bishop
-    cmp rbx, ROOK
-    je .gen_rook
-    cmp rbx, QUEEN
-    je .gen_queen
-    cmp rbx, KING
-    je .gen_king
-    jmp .next_square
-
-.gen_pawn:
-    mov rax, r12
-    call generate_pawn_moves
-    jmp .next_square
-.gen_knight:
-    mov rax, r12
-    call generate_knight_moves
-    jmp .next_square
-.gen_bishop:
-    mov rax, r12
-    call generate_bishop_moves
-    jmp .next_square
-.gen_rook:
-    mov rax, r12
-    call generate_rook_moves
-    jmp .next_square
-.gen_queen:
-    mov rax, r12
-    call generate_queen_moves
-    jmp .next_square
-.gen_king:
-    mov rax, r12
-    call generate_king_moves
-    call generate_castling
-    jmp .next_square
-
-.next_square:
-    inc rax
-    cmp rax, 64
-    jl .square_loop
-
-    call filter_legal_moves
-
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
-; ============================================================
-; generate_pawn_moves
-; ============================================================
-generate_pawn_moves:
-    push rax
-    push rbx
-    push rcx
-    push rdx
+    push r8
+    push r9
+    push r10
+    push r11
     push r12
     push r13
     push r14
+    push r15
 
-    mov r12, rax
-    mov rbx, rax
-    and rbx, 7
+    mov word [move_count], 0
+;   jmp .debug_ret          ; TEMP DEBUG
+
+    movzx r10d, byte [side]
+    mov r11d, r10d
+    xor r11d, 1                 ; enemy side idx
+    imul r10d, r10d, 6          ; vlastny base slot
+
+    ; ================= PESIACI =================
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8]      ; vlastni pesiaci
+    test rbx, rbx
+    jz .knights
+    cmp byte [side], 0
+    jne .pawns_black
+
+    ; ----- biele pesiaci -----
+    ; push1 = (pawns<<8) & ~occ ; push2 = (push1<<8) & rank4
+    mov r15, rbx
+    shl r15, 8
+    mov rax, [bb_occ]
+    not rax
+    and r15, rax                ; push1 ciele
+    mov rdx, r15
+    shl rdx, 8
+    mov rax, [bb_occ]
+    not rax
+    and rdx, rax
+    mov rax, BB_RANK_4
+    and rdx, rax                ; push2 ciele (intermediate aj ciel prazdne)
+    mov rsi, r15
+    mov rax, BB_RANK_8
+    and rsi, rax                ; promo ciele (push1)
+    not rax
+    and r15, rax                ; normal push1
+    mov r9d, 8
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    mov r15, rdx
+    mov r9d, 16
+    call bb_emit_pawn_shift
+    ; caps L: to = from+7, maska (p<<7)&~FILE_H
+    mov r15, rbx
+    shl r15, 7
+    mov rax, BB_NOT_FILE_H
+    and r15, rax
+    lea rax, [bb_side]
+    mov rdx, [rax + r11*8]
+    and r15, rdx
+    mov rsi, r15
+    mov rax, BB_RANK_8
+    and rsi, rax
+    not rax
+    and r15, rax
+    mov r9d, 7
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    ; caps R: to = from+9, maska (p<<9)&~FILE_A
+    mov r15, rbx
+    shl r15, 9
+    mov rax, BB_NOT_FILE_A
+    and r15, rax
+    lea rax, [bb_side]
+    mov rdx, [rax + r11*8]
+    and r15, rdx
+    mov rsi, r15
+    mov rax, BB_RANK_8
+    and rsi, rax
+    not rax
+    and r15, rax
+    mov r9d, 9
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    ; en passant: zdroje = ((ep>>7)&~FILE_A | (ep>>9)&~FILE_H) & pawns
+    movzx eax, byte [enpassant]
+    cmp eax, 255
+    je .knights
+    mov ecx, eax
+    mov rax, 1
+    shl rax, cl                 ; epbit
+    mov rdx, rax
+    shr rdx, 7
+    mov rcx, BB_NOT_FILE_A
+    and rdx, rcx
     mov rcx, rax
-    shr rcx, 3
-
-    movzx rdx, byte [side]
+    shr rcx, 9
+    mov rsi, BB_NOT_FILE_H
+    and rcx, rsi
+    or rdx, rcx
+    and rdx, rbx                ; zdrojove pesiaci
+    mov r14d, FLAG_ENPASSANT
+.ep_w_loop:
     test rdx, rdx
-    jnz .black
-
-.white:
-    cmp rcx, 7
-    je .white_done
-    mov r13, r12
-    add r13, 8
-    mov rax, r13
-    call is_square_empty
-    test rax, rax
-    jz .white_captures
-    cmp rcx, 6
-    je .white_promote_single
-    mov r14, FLAG_NORMAL
+    jz .knights
+    bsf r12, rdx
+    btr rdx, r12
+    movzx r13d, byte [enpassant]
     call add_move
+    jmp .ep_w_loop
 
-    cmp rcx, 1
-    jne .white_captures
-    mov r13, r12
-    add r13, 16
-    mov rax, r13
-    call is_square_empty
-    test rax, rax
-    jz .white_captures
-    mov r14, FLAG_NORMAL
+    ; ----- cierne pesiaci -----
+.pawns_black:
+    ; push1 = (pawns>>8) & ~occ ; push2 = (push1>>8) & rank5
+    mov r15, rbx
+    shr r15, 8
+    mov rax, [bb_occ]
+    not rax
+    and r15, rax
+    mov rdx, r15
+    shr rdx, 8
+    mov rax, [bb_occ]
+    not rax
+    and rdx, rax
+    mov rax, BB_RANK_5
+    and rdx, rax                ; push2 ciele (intermediate aj ciel prazdne)
+    mov rsi, r15
+    mov rax, BB_RANK_1
+    and rsi, rax
+    not rax
+    and r15, rax
+    mov r9d, -8
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    mov r15, rdx
+    mov r9d, -16
+    call bb_emit_pawn_shift
+    ; caps: to = from-9, maska (p>>9)&~FILE_H
+    mov r15, rbx
+    shr r15, 9
+    mov rax, BB_NOT_FILE_H
+    and r15, rax
+    lea rax, [bb_side]
+    mov rdx, [rax + r11*8]
+    and r15, rdx
+    mov rsi, r15
+    mov rax, BB_RANK_1
+    and rsi, rax
+    not rax
+    and r15, rax
+    mov r9d, -9
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    ; caps: to = from-7, maska (p>>7)&~FILE_A
+    mov r15, rbx
+    shr r15, 7
+    mov rax, BB_NOT_FILE_A
+    and r15, rax
+    lea rax, [bb_side]
+    mov rdx, [rax + r11*8]
+    and r15, rdx
+    mov rsi, r15
+    mov rax, BB_RANK_1
+    and rsi, rax
+    not rax
+    and r15, rax
+    mov r9d, -7
+    call bb_emit_pawn_shift
+    mov r15, rsi
+    call bb_emit_promos
+    ; en passant: zdroje = ((ep<<7)&~FILE_H | (ep<<9)&~FILE_A) & pawns
+    movzx eax, byte [enpassant]
+    cmp eax, 255
+    je .knights
+    mov ecx, eax
+    mov rax, 1
+    shl rax, cl
+    mov rdx, rax
+    shl rdx, 7
+    mov rcx, BB_NOT_FILE_H
+    and rdx, rcx
+    mov rcx, rax
+    shl rcx, 9
+    mov rsi, BB_NOT_FILE_A
+    and rcx, rsi
+    or rdx, rcx
+    and rdx, rbx
+    movzx r13d, byte [enpassant]
+    mov r14d, FLAG_ENPASSANT
+.ep_b_loop:
+    test rdx, rdx
+    jz .knights
+    bsf r12, rdx
+    btr rdx, r12
+    movzx r13d, byte [enpassant]
     call add_move
-    jmp .white_captures
+    jmp .ep_b_loop
 
-.white_promote_single:
-    call add_all_promotions
-    jmp .white_captures
+    ; ================= JAZDCI =================
+.knights:
+;   jmp .debug_ret          ; TEMP DEBUG
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8 + 8]
+.knight_loop:
+    test rbx, rbx
+    jz .bishops
+    bsf r12, rbx
+    btr rbx, r12
+    lea rax, [bb_knight_attacks]
+    mov r15, [rax + r12*8]
+    call bb_mask_own
+    and r15, rax
+    call bb_emit_targets
+    jmp .knight_loop
 
-.white_captures:
-    cmp rbx, 0
-    je .white_cap_right
-    mov r13, r12
-    add r13, 7
-    mov rax, r13
-    call is_enemy_piece
-    test rax, rax
-    jz .white_ep_left
-    cmp rcx, 6
-    je .white_promote_cap_l
-    mov r14, FLAG_NORMAL
-    call add_move
-    jmp .white_cap_right
-.white_promote_cap_l:
-    call add_all_promotions
-    jmp .white_cap_right
-.white_ep_left:
-    movzx rax, byte [enpassant]
-    cmp rax, r13
-    jne .white_cap_right
-    mov r14, FLAG_ENPASSANT
-    call add_move
+    ; ================= STRELECI =================
+.bishops:
+;   jmp .debug_ret          ; TEMP DEBUG
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8 + 16]
+.bishop_loop:
+    test rbx, rbx
+    jz .rooks
+    bsf r12, rbx
+    btr rbx, r12
+    mov eax, r12d
+    mov rdx, [bb_occ]
+    call bb_attacks_bishop
+    mov r15, rax
+    call bb_mask_own
+    and r15, rax
+    call bb_emit_targets
+    jmp .bishop_loop
 
-.white_cap_right:
-    cmp rbx, 7
-    je .white_done
-    mov r13, r12
-    add r13, 9
-    mov rax, r13
-    call is_enemy_piece
-    test rax, rax
-    jz .white_ep_right
-    cmp rcx, 6
-    je .white_promote_cap_r
-    mov r14, FLAG_NORMAL
-    call add_move
-    jmp .white_done
-.white_promote_cap_r:
-    call add_all_promotions
-    jmp .white_done
-.white_ep_right:
-    movzx rax, byte [enpassant]
-    cmp rax, r13
-    jne .white_done
-    mov r14, FLAG_ENPASSANT
-    call add_move
+    ; ================= VEZE =================
+.rooks:
+;   jmp .debug_ret          ; TEMP DEBUG
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8 + 24]
+.rook_loop:
+    test rbx, rbx
+    jz .queens
+    bsf r12, rbx
+    btr rbx, r12
+    mov eax, r12d
+    mov rdx, [bb_occ]
+    call bb_attacks_rook
+    mov r15, rax
+    call bb_mask_own
+    and r15, rax
+    call bb_emit_targets
+    jmp .rook_loop
 
-.white_done:
-    jmp .done
+    ; ================= DAMY =================
+.queens:
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8 + 32]
+.queen_loop:
+    test rbx, rbx
+    jz .king
+    bsf r12, rbx
+    btr rbx, r12
+    mov eax, r12d
+    mov rdx, [bb_occ]
+    call bb_attacks_bishop
+    mov r15, rax
+    mov eax, r12d
+    mov rdx, [bb_occ]
+    call bb_attacks_rook
+    or r15, rax
+    call bb_mask_own
+    and r15, rax
+    call bb_emit_targets
+    jmp .queen_loop
 
-.black:
-    cmp rcx, 0
-    je .done
-    mov r13, r12
-    sub r13, 8
-    mov rax, r13
-    call is_square_empty
-    test rax, rax
-    jz .black_captures
-    cmp rcx, 1
-    je .black_promote_single
-    mov r14, FLAG_NORMAL
-    call add_move
+    ; ================= KRAL + ROSADA =================
+.king:
+;   jmp .debug_ret          ; TEMP DEBUG
+    lea rdi, [bb_pieces]
+    mov rbx, [rdi + r10*8 + 40]
+    test rbx, rbx
+    jz .castling
+    bsf r12, rbx
+    lea rax, [bb_king_attacks]
+    mov r15, [rax + r12*8]
+    call bb_mask_own
+    and r15, rax
+    call bb_emit_targets
+.castling:
+    call generate_castling
+    call filter_legal_moves
 
-    cmp rcx, 6
-    jne .black_captures
-    mov r13, r12
-    sub r13, 16
-    mov rax, r13
-    call is_square_empty
-    test rax, rax
-    jz .black_captures
-    mov r14, FLAG_NORMAL
-    call add_move
-    jmp .black_captures
 
-.black_promote_single:
-    call add_all_promotions
-    jmp .black_captures
-
-.black_captures:
-    cmp rbx, 0
-    je .black_cap_right
-    mov r13, r12
-    sub r13, 9
-    mov rax, r13
-    call is_enemy_piece
-    test rax, rax
-    jz .black_ep_left
-    cmp rcx, 1
-    je .black_promote_cap_l
-    mov r14, FLAG_NORMAL
-    call add_move
-    jmp .black_cap_right
-.black_promote_cap_l:
-    call add_all_promotions
-    jmp .black_cap_right
-.black_ep_left:
-    movzx rax, byte [enpassant]
-    cmp rax, r13
-    jne .black_cap_right
-    mov r14, FLAG_ENPASSANT
-    call add_move
-
-.black_cap_right:
-    cmp rbx, 7
-    je .done
-    mov r13, r12
-    sub r13, 7
-    mov rax, r13
-    call is_enemy_piece
-    test rax, rax
-    jz .black_ep_right
-    cmp rcx, 1
-    je .black_promote_cap_r
-    mov r14, FLAG_NORMAL
-    call add_move
-    jmp .done
-.black_promote_cap_r:
-    call add_all_promotions
-    jmp .done
-.black_ep_right:
-    movzx rax, byte [enpassant]
-    cmp rax, r13
-    jne .done
-    mov r14, FLAG_ENPASSANT
-    call add_move
-
-.done:
+    pop r15
     pop r14
     pop r13
     pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
     pop rdx
     pop rcx
     pop rbx
@@ -418,330 +476,8 @@ add_all_promotions:
     ret
 
 ; ============================================================
-; generate_knight_moves
-; ============================================================
-generate_knight_moves:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push r12
-    push r13
-    push r14
-    push rsi
-
-    mov r12, rax
-    mov rbx, rax
-    and rbx, 7
-    mov rcx, rax
-    shr rcx, 3
-
-    lea rsi, [knight_offsets]
-    xor rdx, rdx
-.loop:
-    movsx r13, byte [rsi + rdx]
-    add r13, r12
-
-    mov rax, r13
-    and rax, 7
-    sub rax, rbx
-    mov r8, rax
-    test r8, r8
-    jns .check_file2
-    neg r8
-.check_file2:
-    cmp r8, 2
-    jg .next
-
-    mov rax, r13
-    shr rax, 3
-    sub rax, rcx
-    mov r8, rax
-    test r8, r8
-    jns .check_rank2
-    neg r8
-.check_rank2:
-    cmp r8, 2
-    jg .next
-
-    cmp r13, 0
-    jl .next
-    cmp r13, 63
-    jg .next
-
-    mov rax, r13
-    call is_own_piece
-    test rax, rax
-    jnz .next
-
-    mov r14, FLAG_NORMAL
-    call add_move
-
-.next:
-    inc rdx
-    cmp rdx, 8
-    jl .loop
-
-    pop rsi
-    pop r14
-    pop r13
-    pop r12
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
-; ============================================================
-; generate_bishop / rook / queen
-; ============================================================
-generate_bishop_moves:
-    push rax
-    lea rsi, [bishop_dirs]
-    mov rcx, 4
-    call generate_sliding
-    pop rax
-    ret
-
-generate_rook_moves:
-    push rax
-    lea rsi, [rook_dirs]
-    mov rcx, 4
-    call generate_sliding
-    pop rax
-    ret
-
-generate_queen_moves:
-    push rax
-    push rsi
-    push rcx
-    lea rsi, [bishop_dirs]
-    mov rcx, 4
-    call generate_sliding
-    lea rsi, [rook_dirs]
-    mov rcx, 4
-    call generate_sliding
-    pop rcx
-    pop rsi
-    pop rax
-    ret
-
-; ============================================================
-; generate_sliding
-; Vstup: rax = from, rsi = smerova tabulka, rcx = pocet smerov
-; ============================================================
-generate_sliding:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push r12
-    push r13
-    push r14
-    push rsi
-
-    mov r12, rax
-
-.sdir_loop:
-    movsx r14, byte [rsi]
-    mov r13, r12
-
-.ray_loop:
-    cmp r13, 0
-    jl .next_dir
-    cmp r13, 63
-    jg .next_dir
-    mov rax, r13
-    and rax, 7
-
-    cmp r14, -9
-    je .diag
-    cmp r14, -7
-    je .diag
-    cmp r14, 7
-    je .diag
-    cmp r14, 9
-    je .diag
-    cmp r14, -1
-    je .west
-    cmp r14, 1
-    je .east
-    jmp .north_south
-
-.diag:
-    cmp r14, -9
-    je .diag_sw
-    cmp r14, -7
-    je .diag_se
-    cmp r14, 7
-    je .diag_nw
-    ; NE (9)
-    cmp rax, 7
-    je .next_dir
-    mov rax, r13
-    shr rax, 3
-    cmp rax, 7
-    je .next_dir
-    jmp .do_step
-.diag_sw:
-    cmp rax, 0
-    je .next_dir
-    mov rax, r13
-    shr rax, 3
-    cmp rax, 0
-    je .next_dir
-    jmp .do_step
-.diag_se:
-    cmp rax, 7
-    je .next_dir
-    mov rax, r13
-    shr rax, 3
-    cmp rax, 0
-    je .next_dir
-    jmp .do_step
-.diag_nw:
-    cmp rax, 0
-    je .next_dir
-    mov rax, r13
-    shr rax, 3
-    cmp rax, 7
-    je .next_dir
-    jmp .do_step
-
-.west:
-    cmp rax, 0
-    je .next_dir
-    jmp .do_step
-.east:
-    cmp rax, 7
-    je .next_dir
-    jmp .do_step
-.north_south:
-    mov rax, r13
-    shr rax, 3
-    cmp r14, -8
-    je .north
-    cmp rax, 7
-    je .next_dir
-    jmp .do_step
-.north:
-    cmp rax, 0
-    je .next_dir
-
-.do_step:
-    add r13, r14
-
-    mov rax, r13
-    call is_own_piece
-    test rax, rax
-    jnz .next_dir
-
-    push r14
-    push r13                ; uloz cielove policko, add_move ho nici
-    mov r14, FLAG_NORMAL
-    call add_move
-    pop r13                 ; obnov cielove policko
-    pop r14
-
-    mov rax, r13
-    call is_enemy_piece
-    test rax, rax
-    jnz .next_dir
-
-    jmp .ray_loop
-
-.next_dir:
-    inc rsi
-    dec rcx
-    jnz .sdir_loop
-
-    pop rsi
-    pop r14
-    pop r13
-    pop r12
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
-; ============================================================
-; generate_king_moves
-; ============================================================
-generate_king_moves:
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push r12
-    push r13
-    push r14
-    push rsi
-
-    mov r12, rax
-    mov rbx, rax
-    and rbx, 7
-    mov rcx, rax
-    shr rcx, 3
-
-    lea rsi, [king_dirs]
-    xor rdx, rdx
-.loop:
-    movsx r13, byte [rsi + rdx]
-    add r13, r12
-
-    mov rax, r13
-    and rax, 7
-    sub rax, rbx
-    mov r8, rax
-    test r8, r8
-    jns .check_abs_f
-    neg r8
-.check_abs_f:
-    cmp r8, 1
-    jg .next
-
-    mov rax, r13
-    shr rax, 3
-    sub rax, rcx
-    mov r8, rax
-    test r8, r8
-    jns .check_abs_r
-    neg r8
-.check_abs_r:
-    cmp r8, 1
-    jg .next
-
-    cmp r13, 0
-    jl .next
-    cmp r13, 63
-    jg .next
-
-    mov rax, r13
-    call is_own_piece
-    test rax, rax
-    jnz .next
-
-    mov r14, FLAG_NORMAL
-    call add_move
-
-.next:
-    inc rdx
-    cmp rdx, 8
-    jl .loop
-
-    pop rsi
-    pop r14
-    pop r13
-    pop r12
-    pop rdx
-    pop rcx
-    pop rbx
-    pop rax
-    ret
-
-; ============================================================
-; generate_castling
+; generate_castling - rosady (mailbox kontroly prazdnosti/veze,
+; generuje sa max 2x na uzol; legality cez priechod robi filter)
 ; ============================================================
 generate_castling:
     push rax
@@ -850,3 +586,18 @@ generate_castling:
     pop rbx
     pop rax
     ret
+
+; ============================================================
+; is_square_empty - pomocnik pre generate_castling
+; ============================================================
+is_square_empty:
+    lea rdi, [board]
+    movzx rax, byte [rdi + rax]
+    test rax, rax
+    setz al
+    movzx rax, al
+    ret
+
+section .bss
+section .rodata
+

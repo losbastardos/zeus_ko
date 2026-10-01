@@ -192,7 +192,7 @@ extern make_move, unmake_move, tt_probe
 extern pv_moves, pv_moves_len
 extern msg_newline
 extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path, tb_tb_size
-extern bb_validate_position, bb_debug_mismatch
+extern pos_validate, generate_all_moves, print_move_list
 extern book_pick_move, book_mode, book_search_depth
 extern tb_wdl_payload_probe_byte, tb_dtz_payload_probe_byte
 extern tb_wdl_payload_probe_off, tb_dtz_payload_probe_off
@@ -2369,9 +2369,22 @@ uci_loop:
     test rax, rax
     jnz .bbtest
 
+    ; 'list' (non-standard helper: legalne tahy aktualnej pozicie)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_list]
+    call uci_str_eq
+    test rax, rax
+    jnz .list
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
+    jmp .loop
+
+.list:
+    call generate_all_moves
+    call print_move_list
     jmp .loop
 
 .isready:
@@ -2790,7 +2803,7 @@ uci_loop:
     jmp .loop
 
 .bbtest:
-    call bb_validate_position
+    call pos_validate
     mov r12, rax
     lea rdi, [uci_bbtest_prefix]
     call write_cstr
@@ -2799,9 +2812,6 @@ uci_loop:
     lea rdi, [msg_newline]
     mov rdx, 1
     call write_str
-    test r12, r12
-    jz .loop
-    call bb_debug_mismatch
     jmp .loop
 
 .done:
@@ -2823,3 +2833,4 @@ uci_loop:
 .str_suite:   db "suite", 0
 .str_tbtest:  db "tbtest", 0
 .str_bbtest:  db "bbtest", 0
+.str_list:    db "list", 0

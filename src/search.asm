@@ -116,7 +116,7 @@ extern pv_moves, pv_moves_len, pv_table, pv_len, root_pv_table, root_pv_len
 extern nodes_searched, search_last_score
 extern search_limits, uci_stop_flag
 extern apply_move, update_position_state
-extern pos_bb_init
+extern pos_bb_move_delta
 extern generate_all_moves, is_in_check, evaluate
 extern inc_eval_valid, inc_mg, inc_eg, inc_phase, inc_bish_w, inc_bish_b, inc_wking, inc_bking
 extern inc_pawn_dirty, inc_pawn_score, inc_mask_w, inc_mask_b, inc_pawn_files, inc_passed_clean
@@ -658,6 +658,7 @@ incache_revert:
 
 
 ; ============================================================
+
 ; make_move - aplikuje tah a ulozi undo informacie do undo_stack
 ; Vstup: ax = 16-bitovy tah
 ; ============================================================
@@ -905,8 +906,22 @@ unmake_move:
     mov byte [rsi + 59], EMPTY
 
 .done:
-    ; E10/F1 invariant: bb stav konzistentny s obnovenym board[64]
-    call pos_bb_init
+    ; E10/F3 invariant: bb stav konzistentny s obnovenym board[64] cez
+    ; inkrementalnu xor delta (samoinverzna, side uz je mover).
+    ; from/to/flags/moved/captured citame z undo zaznamu (registre
+    ; r12-r15 boli na tejto ceste prepisane).
+    lea rcx, [undo_stack]
+    add rcx, [undo_sp]          ; undo_sp uz ukazuje na platny zaznam
+    movzx eax, byte [rcx + 0]   ; from
+    movzx edx, byte [rcx + 1]   ; to
+    shl edx, 6
+    or eax, edx
+    movzx edx, byte [rcx + 2]   ; flags
+    shl edx, 12
+    or eax, edx                 ; 16-bitovy tah
+    movzx esi, byte [rcx + 3]   ; moved_piece
+    movzx edi, byte [rcx + 4]   ; captured_piece
+    call pos_bb_move_delta
     ; E10/F2: hash delta — XOR in obnovene (stare) stavove kluce; plny
     ; compute_hash netreba. acc_hash synchronizujeme len ak sa inverzna
     ; NNUE delta aplikovala (inak acc zostava nepplatny -> refresh v eval).
@@ -3120,6 +3135,7 @@ perft:
     pop rbx
     ret
 
+
 ; ============================================================
 ; collect_pv - ulozi celu PV do pv_moves[] (pre panel/UCI)
 ; Pouziva predpocitanu pv_table z searchu (rychlejsie ako TT sonda).
@@ -3233,3 +3249,4 @@ book_pick_move:
     pop r12
     pop rbx
     ret
+
