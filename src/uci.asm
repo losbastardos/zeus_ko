@@ -768,13 +768,32 @@ uci_setoption:
     mov r14, rbx          ; dlzka id
     mov r12, rcx
 
-    ; ocakavame 'value'
+    ; ocakavame 'value' (povinne podla UCI); ak chyba, tolerancne
+    ; pouzijeme nasledujuci token rovno ako hodnotu (napr. GUI, ktore
+    ; 'value' nevysiela — inak by sa option mlcky nastavil na 0/false)
     mov rdi, r12
     call uci_token
     cmp rax, -1
     je .done
     test rbx, rbx
     jz .done
+
+    mov rdi, rax
+    mov rsi, rbx
+    lea rdx, [rel .str_value]
+    mov r15, rax          ; start tokenu (hodnota, ak 'value' chyba)
+    push rcx
+    push rbx
+    call uci_str_eq
+    pop rbx
+    pop rcx
+    test rax, rax
+    jnz .value_keyword
+
+    ; 'value' chyba: tento token JE hodnota (rbx = dlzka, rcx = zvysok)
+    jmp .value_ready
+
+.value_keyword:
     mov r12, rcx
 
     ; hodnota
@@ -1076,6 +1095,7 @@ uci_setoption:
     ret
 
 .str_hash:     db "Hash", 0
+.str_value:    db "value", 0
 .str_ownbook:  db "OwnBook", 0
 .str_ponder:   db "Ponder", 0
 .str_syzygypath: db "SyzygyPath", 0
