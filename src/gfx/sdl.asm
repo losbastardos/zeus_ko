@@ -88,7 +88,6 @@ global sdl_gfx_init, sdl_gfx_close, sdl_gfx_run, sdl_gfx_refresh
 
 extern config_get, parse_int
 extern generate_all_moves, parse_user_move, find_move, apply_move, update_position_state, compute_hash, record_hash
-extern inc_eval_valid
 extern print_move, print_newline, print_number
 extern search_best_move, book_lookup
 
@@ -1227,7 +1226,6 @@ sdl_engine_turn:
     pop rax
     call apply_move
     call update_position_state
-    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call compute_hash
     call record_hash
     call sdl_gfx_refresh
@@ -1265,7 +1263,6 @@ sdl_gfx_run:
     jz .done
     call apply_move
     call update_position_state
-    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call compute_hash
     call record_hash
     jmp .loop

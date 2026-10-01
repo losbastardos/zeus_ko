@@ -173,7 +173,6 @@ global uci_loop, write_cstr, search_poll_input, uci_now_ms
 extern init_board, init_hash_history, record_hash, clear_history
 extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit
 extern generate_all_moves, find_move, apply_move, update_position_state, compute_hash
-extern inc_eval_valid
 extern search_best_move, book_lookup, print_move, square_to_str, print_number
 extern tt_init
 extern parse_fen_string, parse_int, config_get
@@ -572,7 +571,6 @@ uci_apply_moves:
 .pgn_no_san:
     call apply_move
     call update_position_state
-    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call compute_hash
     call record_hash
     mov rax, [uci_pgn_idx]

@@ -19,7 +19,6 @@ extern board, side, castle, enpassant, halfmove, fullmove
 extern piece_chars
 extern compute_hash, init_hash_history, record_hash
 extern parse_int
-extern inc_eval_valid
 extern pos_bb_init
 
 ; ============================================================
@@ -298,7 +297,6 @@ parse_fen_string:
     call compute_hash
     call init_hash_history
     call record_hash
-    mov byte [inc_eval_valid], 0   ; invalidacia inkrementalneho eval cache
 
     xor rax, rax
     jmp .done

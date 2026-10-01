@@ -53,7 +53,6 @@ global gfx_init, gfx_close, gfx_run, gfx_refresh, gfx_square_from_xy
 
 extern config_get, parse_int
 extern generate_all_moves, parse_user_move, find_move, apply_move, update_position_state, compute_hash, record_hash
-extern inc_eval_valid
 extern print_move, print_newline
 extern search_best_move, book_lookup
 extern mouse_init, mouse_read_event
@@ -1422,7 +1421,6 @@ gfx_engine_turn:
     pop rax
     call apply_move
     call update_position_state
-    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call compute_hash
     call record_hash
     call gfx_refresh
@@ -1460,7 +1458,6 @@ gfx_run:
     jz .done
     call apply_move
     call update_position_state
-    mov byte [inc_eval_valid], 0   ; invalidacia inkr. eval cache (UI tah mimo make/unmake)
     call compute_hash
     call record_hash
     jmp .loop

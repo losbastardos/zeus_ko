@@ -16,44 +16,17 @@ DEFAULT REL
 section .data
 
 global evaluate, eval_dbg_mg, eval_dbg_eg
-global inc_eval_valid, incache_update, incache_revert, incache_invalidate
-global inc_mg, inc_eg, inc_phase, inc_bish_w, inc_bish_b, inc_wking, inc_bking
-global inc_pawn_dirty, inc_pawn_score, inc_mask_w, inc_mask_b, inc_pawn_files, inc_passed_clean
 global material_mg, material_eg, phase_weights
-extern incache_update, incache_revert
 eval_dbg_mg: dd 0
 eval_dbg_eg: dd 0
 
 ; ============================================================
-; Inkrementalny eval cache (iba classic eval, eval_mode = 0)
-; Cache drzi vysledok "scan" fazy evaluate: MG/EG material+PST
-; sucet, fazu, pocty strelcov, policka kralov, masky a pocty
-; pesiacov per file + pawn structure skore.
-; Invariant: inc_eval_valid = 1 => cache zodpoveda boardu. Platnosť
-; riadia výhradne make_move (incache_update delta) a unmake_move
-; (incache_revert inverzná delta, žiadny snapshot); každá zmena boardu
-; mimo make/unmake (UI ťah, FEN, init) musí cache invalidovať.
+; Passed pesiak masky — vystup pawn structure sekcie evaluate
+; (pouzivaju connected passed + rook behind PP bonusy)
 ; ============================================================
 section .bss
-inc_eval_valid:  resd 1          ; 1 = cache plati
-inc_mg:          resd 1          ; scan MG sucet (biely - cierny)
-inc_eg:          resd 1          ; scan EG sucet
-inc_phase:       resd 1          ; faza non-pawn materialu (max 24)
-inc_bish_w:      resd 1
-inc_bish_b:      resd 1
-inc_wking:       resd 1
-inc_bking:       resd 1
-inc_pawn_dirty:  resd 1          ; 1 = inc_pawn_score treba prepocitat
-inc_pawn_score:  resd 1          ; pawn struct skore (tapered jednotky)
-                 resd 1          ; zarovnanie
-                 alignb 8
-inc_mask_w:      resq 1          ; maska bielych pesiacov
-inc_mask_b:      resq 1          ; maska ciernych pesiacov
-inc_pawn_files:  resb 16         ; pocty pesiacov per file [biela 8][cierna 8]
-                 resb 16          ; zarovnanie na 96
-inc_passed_w:    resq 1          ; passed pesiak masky (vystup eval_passed_masks)
-inc_passed_b:    resq 1
-inc_passed_clean: resd 1         ; 1 = masky zodpovedaju pawn maskam (pawns nezmenene)
+passed_w:        resq 1          ; maska bielych passed pesiacov
+passed_b:        resq 1
 section .data
 
 ; MG material = povodne hodnoty; EG: pesiaci viac, leziece menej
@@ -169,43 +142,118 @@ extern side, eval_mode
 extern nnue2_eval, nnue2_ready
 extern prof_evals
 extern moved_piece, captured_piece, promo_pieces
+extern bb_pieces, bb_side, bb_occ
+extern bb_knight_attacks
+extern bb_attacks_bishop, bb_attacks_rook, bb_attacks_queen
 
 ; ============================================================
-; MOB_WALK df, dr, sliding - krok/luc mobility z policka
-; Zrata dosiahnutelne policka do ecx. Register set mobility pasu:
-;   rbx = board base, r12 = from, r13d = farba (0/8),
-;   r10d/r11d = zakladny file/rank, ecx = counter,
-;   r8d/r9d = kurzor file/rank, eax/edx/esi/edi = scratch
+; MOB_BLOCK slot_off, typ, atk, outpost - mobilita jedneho typu figury
+;   slot_off: offset (B) od [rbp-120] base = &bb_pieces[color*6 + 1]
+;   typ:      KNIGHT/BISHOP/ROOK/QUEEN (vlozi sa do r14d)
+;   atk:      0 = bb_knight_attacks tabulka, 1 = bb_attacks_bishop,
+;             2 = bb_attacks_rook, 3 = bb_attacks_queen
+;   outpost:  1 = vyhodnotit outpost bonus (konstanty KNIGHT vs BISHOP)
+; Register set pasu (nastaveny pred blokom v .mobility):
+;   [rbp-112] = vlastna maska (vylucenie vlastnych policok),
+;   [rbp-120] = base slotov, r13d = farba (0/8), r15d = MG acc,
+;   [rbp-48] = EG acc, rbx = board base;
+;   lokalne: r12 = sq, [rbp-96] = iteracna maska
+; Pocty su ekvivalentne povodnemu mailbox MOB_WALK countingu:
+; prazdne + super policka, vlastna figura blokuje (aj seba).
 ; ============================================================
-%macro MOB_WALK 3
-    mov r8d, r10d
-    add r8d, %1
-    mov r9d, r11d
-    add r9d, %2
-%%step:
-    cmp r8d, 7
-    ja %%done               ; mimo 0..7 (unsigned chyti aj zaporne)
-    cmp r9d, 7
-    ja %%done
-    mov esi, r9d
-    shl esi, 3
-    add esi, r8d            ; cielove policko
-    movzx edi, byte [rbx + rsi]
-    test edi, edi
-    jz %%empty
-    mov esi, edi
-    and esi, COLOR_MASK
-    cmp esi, r13d
-    je %%done               ; vlastna figura: blokuje (nepocitaj)
-    inc ecx                 ; nepriatelska figura: branie dostupne
-    jmp %%done
-%%empty:
-    inc ecx
-%if %3
-    add r8d, %1
-    add r9d, %2
-    jmp %%step
+%macro MOB_BLOCK 4
+    mov r14d, %2
+    mov rax, [rbp - 120]
+    mov rdx, [rax + %1]
+    mov [rbp - 96], rdx         ; iteracna maska (prezije scoring clobbery)
+%%loop:
+    mov rdi, [rbp - 96]
+    test rdi, rdi
+    jz %%done
+    bsf r12, rdi
+    btr qword [rbp - 96], r12
+%if %4
+    call eval_knight_outpost
+    test eax, eax
+    jz %%op_done
+%if %3 == 0
+    mov eax, OUTPOST_MG
+    mov edx, OUTPOST_EG
+%else
+    mov eax, B_OUTPOST_MG
+    mov edx, B_OUTPOST_EG
 %endif
+    mov esi, r12d
+    and esi, 7
+    cmp esi, 2
+    jb %%op_score
+    cmp esi, 5
+    jbe %%op_c
+    jmp %%op_score
+%%op_c:
+%if %3 == 0
+    mov eax, OUTPOST_C_MG
+    mov edx, OUTPOST_C_EG
+%else
+    mov eax, B_OUTPOST_C_MG
+    mov edx, B_OUTPOST_C_EG
+%endif
+%%op_score:
+    test r13d, r13d
+    jz %%op_w
+    sub r15d, eax
+    sub dword [rbp - 48], edx
+    jmp %%op_done
+%%op_w:
+    add r15d, eax
+    add dword [rbp - 48], edx
+%%op_done:
+%endif
+    ; utoky figury; ciele = attacks & ~vlastna
+%if %3 == 0
+    lea rax, [bb_knight_attacks]
+    mov rcx, [rax + r12*8]
+%else
+    mov eax, r12d
+    mov rdx, [bb_occ]
+  %if %3 == 1
+    call bb_attacks_bishop
+  %elif %3 == 2
+    call bb_attacks_rook
+  %else
+    call bb_attacks_queen
+  %endif
+    mov rcx, rax
+%endif
+    mov rdx, [rbp - 112]
+    not rdx
+    and rcx, rdx
+    popcnt rcx, rcx
+    ; MG mobility: w * (count - baseline)
+    mov eax, ecx
+    lea rsi, [mob_base_mg]
+    movzx edi, byte [rsi + r14]
+    sub eax, edi
+    lea rsi, [mob_w_mg]
+    movzx edi, byte [rsi + r14]
+    imul eax, edi
+    ; EG mobility: w * (count - baseline)
+    mov edx, ecx
+    lea rsi, [mob_base_eg]
+    movzx edi, byte [rsi + r14]
+    sub edx, edi
+    lea rsi, [mob_w_eg]
+    movzx edi, byte [rsi + r14]
+    imul edx, edi
+    test r13d, r13d
+    jz %%mob_w
+    sub r15d, eax
+    sub dword [rbp - 48], edx
+    jmp %%loop
+%%mob_w:
+    add r15d, eax
+    add dword [rbp - 48], edx
+    jmp %%loop
 %%done:
 %endmacro
 
@@ -313,82 +361,6 @@ eval_knight_outpost:
 ; INKREMENTALNY EVAL CACHE
 ; ============================================================
 
-; ------------------------------------------------------------
-; incache_invalidate - zneplatni cache (zmena boardu mimo make/unmake)
-; ------------------------------------------------------------
-incache_invalidate:
-    mov byte [inc_eval_valid], 0
-    ret
-
-; ------------------------------------------------------------
-; eval_passed_masks - vypocita masky passed pesiacov z cache masek
-; Vystup: inc_passed_w, inc_passed_b
-; Clobber: rax, rbx, rcx, rdx, rsi, rdi, r8, r9
-; ------------------------------------------------------------
-eval_passed_masks:
-    mov byte [inc_passed_clean], 0
-    mov qword [inc_passed_w], 0
-    mov qword [inc_passed_b], 0
-    lea r8, [file_masks]
-    ; --- bieli passeri: bez cierneho pesiaca na 3 files vysse ---
-    mov rax, [inc_mask_w]
-    lea r9, [hi_rank_masks]
-.w_loop:
-    test rax, rax
-    jz .w_done
-    bsf rdx, rax
-    btr rax, rdx
-    mov rbx, rdx
-    and rbx, 7
-    mov rdi, [r8 + rbx*8]
-    test rbx, rbx
-    jz .w_nl
-    or rdi, [r8 + rbx*8 - 8]
-.w_nl:
-    cmp rbx, 7
-    je .w_nr
-    or rdi, [r8 + rbx*8 + 8]
-.w_nr:
-    mov rcx, rdx
-    shr rcx, 3
-    mov rsi, [r9 + rcx*8]
-    and rdi, rsi
-    and rdi, [inc_mask_b]
-    jnz .w_loop
-    bts qword [inc_passed_w], rdx
-    jmp .w_loop
-.w_done:
-    ; --- cierni passeri: bez bieleho pesiaca na 3 files nizsie ---
-    mov rax, [inc_mask_b]
-    lea r9, [lo_rank_masks]
-.b_loop:
-    test rax, rax
-    jz .b_done
-    bsf rdx, rax
-    btr rax, rdx
-    mov rbx, rdx
-    and rbx, 7
-    mov rdi, [r8 + rbx*8]
-    test rbx, rbx
-    jz .b_nl
-    or rdi, [r8 + rbx*8 - 8]
-.b_nl:
-    cmp rbx, 7
-    je .b_nr
-    or rdi, [r8 + rbx*8 + 8]
-.b_nr:
-    mov rcx, rdx
-    shr rcx, 3
-    mov rsi, [r9 + rcx*8]
-    and rdi, rsi
-    and rdi, [inc_mask_w]
-    jnz .b_loop
-    bts qword [inc_passed_b], rdx
-    jmp .b_loop
-.b_done:
-    mov byte [inc_passed_clean], 1
-    ret
-
 ; ============================================================
 ; evaluate - vrati skore z pohladu bieleho (tapered MG/EG)
 ; Vystup: eax = skore
@@ -399,7 +371,7 @@ evaluate:
     inc qword [prof_evals]
     push rbp
     mov rbp, rsp
-    sub rsp, 112
+    sub rsp, 128
     push rbx
     push r12
     push r13
@@ -431,6 +403,8 @@ evaluate:
     ; [rbp-72] = king attack score pre bieleho (utok na cierneho krala) (dword)
     ; [rbp-76] = king attack score pre cierneho (utok na bieleho krala) (dword)
     ; [rbp-100] = baseline r15 pri prepocitavani pawn struct (dword)
+    ; [rbp-112] = vlastna maska strany (mobility), [rbp-120] = base
+    ;   bb_pieces slotov, [rbp-128] = color idx (mobility)
     xor eax, eax
     mov [rbp - 8], rax
     mov [rbp - 16], rax
@@ -443,37 +417,6 @@ evaluate:
     mov [rbp - 68], rax
     mov dword [rbp - 72], 0
     mov dword [rbp - 76], 0
-
-    ; ---- inkrementalny cache: pri zasahu preskocime scan loop ----
-    cmp byte [eval_mode], 0
-    jne .scan_start
-    cmp byte [inc_eval_valid], 0
-    je .scan_start
-    mov r15d, [inc_mg]
-    mov eax, [inc_eg]
-    mov [rbp - 48], eax
-    mov eax, [inc_phase]
-    mov [rbp - 56], eax
-    mov eax, [inc_bish_w]
-    mov [rbp - 36], eax
-    mov eax, [inc_bish_b]
-    mov [rbp - 40], eax
-    mov eax, [inc_wking]
-    mov [rbp - 64], eax
-    mov eax, [inc_bking]
-    mov [rbp - 68], eax
-    mov rax, [inc_mask_w]
-    mov [rbp - 8], rax
-    mov rax, [inc_mask_b]
-    mov [rbp - 16], rax
-    mov rax, [inc_pawn_files]
-    mov [rbp - 24], rax
-    mov rax, [inc_pawn_files + 8]
-    mov [rbp - 32], rax
-    cmp byte [inc_passed_clean], 0
-    jne .mobility               ; masky platia z predchadzajuceho vypoctu
-    call eval_passed_masks      ; passed masky potrebuju aj veze (behind PP)
-    jmp .mobility
 
 .scan_start:
     xor r15d, r15d          ; MG akumulator
@@ -572,23 +515,12 @@ evaluate:
     mov [rbp - 68], r12d
 
 .collect:
-    ; zber dat pre pawn structure / bishop pair
+    ; zber dat pre bishop pair (pawn masky/file counts sa beru priamo
+    ; z bitboardov po skene — pozri .pawn_from_bb)
     cmp r14d, PAWN
-    jne .col_bishop
-    mov ebx, r12d
-    and ebx, 7              ; file
-    mov rdi, 1
-    mov ecx, r12d
-    shl rdi, cl             ; bit policka
-    test r13d, r13d
-    jnz .col_black_pawn
-    or [rbp - 8], rdi
-    inc byte [rbp - 24 + rbx]
-    jmp .skip
-.col_black_pawn:
-    or [rbp - 16], rdi
-    inc byte [rbp - 32 + rbx]
-    jmp .skip
+    je .skip
+    cmp r14d, BISHOP
+    jne .skip
 .col_bishop:
     cmp r14d, BISHOP
     jne .skip
@@ -604,182 +536,59 @@ evaluate:
     cmp r12, 64
     jl .next_square
 
-    ; ---- uloz scan vysledky do inkrementalneho cache (iba classic) ----
-    cmp byte [eval_mode], 0
-    jne .mobility
-    mov [inc_mg], r15d
-    mov eax, [rbp - 48]
-    mov [inc_eg], eax
-    mov eax, [rbp - 56]
-    mov [inc_phase], eax
-    mov eax, [rbp - 36]
-    mov [inc_bish_w], eax
-    mov eax, [rbp - 40]
-    mov [inc_bish_b], eax
-    mov eax, [rbp - 64]
-    mov [inc_wking], eax
-    mov eax, [rbp - 68]
-    mov [inc_bking], eax
-    mov rax, [rbp - 8]
-    mov [inc_mask_w], rax
-    mov rax, [rbp - 16]
-    mov [inc_mask_b], rax
-    mov rax, [rbp - 24]
-    mov [inc_pawn_files], rax
-    mov rax, [rbp - 32]
-    mov [inc_pawn_files + 8], rax
-    mov byte [inc_eval_valid], 1
-    mov byte [inc_pawn_dirty], 1   ; pawn struct treba pri najblizsom evalu prepocitat
-    mov byte [inc_passed_clean], 0
+    ; ---- pawn masky + file counts priamo z bitboardov ----
+    ; (bitboard stav je primarny a po kazdom make/unmake synchronizovany)
+    lea rax, [bb_pieces]
+    mov rdx, [rax]              ; bb_pieces[biela*6 + P-1]
+    mov [rbp - 8], rdx
+    mov rdx, [rax + 6*8]        ; bb_pieces[cierna*6 + P-1]
+    mov [rbp - 16], rdx
+    lea rsi, [file_masks]
+    xor ecx, ecx
+.pawn_fc_loop:
+    mov rdi, [rsi + rcx*8]
+    mov rax, rdi
+    and rax, [rbp - 8]
+    popcnt rax, rax
+    mov [rbp - 24 + rcx], al
+    mov rax, rdi
+    and rax, [rbp - 16]
+    popcnt rax, rax
+    mov [rbp - 32 + rcx], al
+    inc ecx
+    cmp ecx, 8
+    jl .pawn_fc_loop
 
 .mobility:
-    ; ================= MOBILITY + OUTPOSTY =================
-    ; pocet pseudo-legálnych cielov N/B/R/Q (prazdne + super policka,
-    ; vlastne figury blokuju); vaha za policko podla typu, MG/EG
+    ; ================= MOBILITY + OUTPOSTY (bitboard) =================
+    ; pocet cielov N/B/R/Q = popcount(utoky(sq, bb_occ) & ~vlastna);
+    ; vaha za policko podla typu, MG/EG. Bit-ekvivalent povodneho
+    ; mailbox MOB_WALK countingu (prazdne + super policka, vlastne
+    ; figury blokuju).
     lea rbx, [board]
-    xor r12, r12
-.mob_loop:
-    movzx r13d, byte [rbx + r12]
-    test r13d, r13d
-    jz .mob_next
-    mov r14d, r13d
-    and r14d, PIECE_MASK
-    cmp r14d, KNIGHT
-    jb .mob_next
-    cmp r14d, QUEEN
-    ja .mob_next
-    and r13d, COLOR_MASK
-    mov r10d, r12d
-    and r10d, 7              ; zakladny file
-    mov r11d, r12d
-    shr r11d, 3              ; zakladny rank
-    cmp r14d, KNIGHT
-    je .mob_knight
-    cmp r14d, BISHOP
-    je .mob_b
-    cmp r14d, ROOK
-    je .mob_r
-    ; dama: diagonalne + rovne
-    xor ecx, ecx
-    MOB_WALK  1,  1, 1
-    MOB_WALK  1, -1, 1
-    MOB_WALK -1,  1, 1
-    MOB_WALK -1, -1, 1
-    MOB_WALK  1,  0, 1
-    MOB_WALK -1,  0, 1
-    MOB_WALK  0,  1, 1
-    MOB_WALK  0, -1, 1
-    jmp .mob_score
-.mob_b:
-    xor ecx, ecx
-    MOB_WALK  1,  1, 1
-    MOB_WALK  1, -1, 1
-    MOB_WALK -1,  1, 1
-    MOB_WALK -1, -1, 1
-    ; outpost pre strelca (konzervativny, iba MG)
-    push rcx
-    call eval_knight_outpost      ; funkcia je genericka (rank + pesiak brani / neutok)
-    test eax, eax
-    jz .mob_b_done
-    mov eax, B_OUTPOST_MG
-    mov edx, B_OUTPOST_EG
-    mov esi, r12d
-    and esi, 7
-    cmp esi, 2
-    jb .mob_b_op_score
-    cmp esi, 5
-    jbe .mob_b_op_c
-    jmp .mob_b_op_score
-.mob_b_op_c:
-    mov eax, B_OUTPOST_C_MG
-    mov edx, B_OUTPOST_C_EG
-.mob_b_op_score:
-    test r13d, r13d
-    jz .mob_b_op_w
-    sub r15d, eax
-    sub dword [rbp - 48], edx
-    jmp .mob_b_done
-.mob_b_op_w:
-    add r15d, eax
-    add dword [rbp - 48], edx
-.mob_b_done:
-    pop rcx
-    jmp .mob_score
-.mob_r:
-    xor ecx, ecx
-    MOB_WALK  1,  0, 1
-    MOB_WALK -1,  0, 1
-    MOB_WALK  0,  1, 1
-    MOB_WALK  0, -1, 1
-    jmp .mob_score
-.mob_knight:
-    ; outpost pred countom (ecx este volne)
-    call eval_knight_outpost
-    test eax, eax
-    jz .mob_kn_count
-    mov eax, OUTPOST_MG
-    mov edx, OUTPOST_EG
-    mov esi, r12d
-    and esi, 7
-    cmp esi, 2               ; centralne file c-f (2..5): viac
-    jb .mob_op_score
-    cmp esi, 5
-    jbe .mob_op_c
-    jmp .mob_op_score
-.mob_op_c:
-    mov eax, OUTPOST_C_MG
-    mov edx, OUTPOST_C_EG
-.mob_op_score:
-    test r13d, r13d
-    jz .mob_op_w
-    sub r15d, eax
-    sub dword [rbp - 48], edx
-    jmp .mob_kn_count
-.mob_op_w:
-    add r15d, eax
-    add dword [rbp - 48], edx
-.mob_kn_count:
-    xor ecx, ecx
-    MOB_WALK  1,  2, 0
-    MOB_WALK  2,  1, 0
-    MOB_WALK  2, -1, 0
-    MOB_WALK  1, -2, 0
-    MOB_WALK -1, -2, 0
-    MOB_WALK -2, -1, 0
-    MOB_WALK -2,  1, 0
-    MOB_WALK -1,  2, 0
-.mob_score:
-    mov r11d, ecx
+    mov qword [rbp - 128], 0     ; color idx 0=biela, 1=cierna
+.mob_color:
+    mov r12, [rbp - 128]
+    mov r13d, r12d
+    shl r13d, 3                  ; farba 0/8
+    lea rax, [bb_side]
+    mov rax, [rax + r12*8]
+    mov [rbp - 112], rax         ; vlastna maska
+    lea rax, [r12 + r12*2]
+    shl rax, 4                   ; color*48
+    lea rdx, [bb_pieces]
+    add rax, rdx
+    add rax, 8                   ; base = &bb_pieces[color*6 + 1] (jazdec)
+    mov [rbp - 120], rax
 
-    ; MG mobility: w * (count - baseline)
-    mov eax, r11d
-    lea rsi, [mob_base_mg]
-    movzx edi, byte [rsi + r14]
-    sub eax, edi
-    lea rsi, [mob_w_mg]
-    movzx edi, byte [rsi + r14]
-    imul eax, edi
+    MOB_BLOCK 0,  KNIGHT, 0, 1
+    MOB_BLOCK 8,  BISHOP, 1, 1
+    MOB_BLOCK 16, ROOK,   2, 0
+    MOB_BLOCK 24, QUEEN,  3, 0
 
-    ; EG mobility: w * (count - baseline)
-    mov edx, r11d
-    lea rsi, [mob_base_eg]
-    movzx edi, byte [rsi + r14]
-    sub edx, edi
-    lea rsi, [mob_w_eg]
-    movzx edi, byte [rsi + r14]
-    imul edx, edi
-    test r13d, r13d
-    jz .mob_w
-    sub r15d, eax
-    sub dword [rbp - 48], edx
-    jmp .mob_next
-.mob_w:
-    add r15d, eax
-    add dword [rbp - 48], edx
-.mob_next:
-    inc r12
-    cmp r12, 64
-    jl .mob_loop
+    inc qword [rbp - 128]
+    cmp qword [rbp - 128], 2
+    jl .mob_color
 
     ; ================= KING SAFETY (iba MG) =================
     ; plati na vlastnej polovici (biely rank 0-3, cierny 4-7):
@@ -1076,19 +885,8 @@ evaluate:
 .no_bp_b:
 
     ; --- pawn structure per file: doubled + isolated ---
-    ; cache hit: pripocitame ulozene skore, ine len prepocitame
-    cmp byte [eval_mode], 0
-    jne .ps_full
-    cmp byte [inc_eval_valid], 0
-    je .ps_full
-    cmp byte [inc_pawn_dirty], 0
-    jne .ps_full
-    add r15d, [inc_pawn_score]
-    jmp .ps_done
-.ps_full:
-    mov [rbp - 100], r15d       ; baseline pre vypocet pawn struct delta
-    mov qword [inc_passed_w], 0
-    mov qword [inc_passed_b], 0
+    mov qword [passed_w], 0
+    mov qword [passed_b], 0
     xor r12, r12            ; file
 .file_loop:
     movzx eax, byte [rbp - 24 + r12]    ; wcount
@@ -1175,7 +973,7 @@ evaluate:
     and rdi, [rbp - 16]
     jnz .pp_w_loop
     ; passed: bonus = PASSED_BASE + PASSED_STEP * rank
-    bts qword [inc_passed_w], rdx   ; zaznac bieleho passera
+    bts qword [passed_w], rdx   ; zaznac bieleho passera
     imul ecx, ecx, PASSED_STEP
     add ecx, PASSED_BASE
     add r15d, ecx
@@ -1211,7 +1009,7 @@ evaluate:
     jnz .pp_b_loop
     ; passed: bonus = PASSED_BASE + PASSED_STEP * (7 - rank); rcx = rank
     ; pozor: nepouzivat eax/rax - v rax je maska ciernych pesiacov!
-    bts qword [inc_passed_b], rdx   ; zaznac cierneho passera
+    bts qword [passed_b], rdx   ; zaznac cierneho passera
     mov edx, 7
     sub edx, ecx
     imul edx, edx, PASSED_STEP
@@ -1226,7 +1024,7 @@ evaluate:
     lea rsi, [board]
 
     ; bieli passeri
-    mov rax, [inc_passed_w]
+    mov rax, [passed_w]
 .cpp_w_loop:
     test rax, rax
     jz .cpp_b_start
@@ -1295,7 +1093,7 @@ evaluate:
     jmp .cpp_w_loop
 
 .cpp_b_start:
-    mov rax, [inc_passed_b]
+    mov rax, [passed_b]
 .cpp_b_loop:
     test rax, rax
     jz .cpp_done
@@ -1365,13 +1163,6 @@ evaluate:
     jmp .cpp_b_loop
 
 .cpp_done:
-    ; pawn struct delta -> cache (pri dalsom hit uz len pripocitame)
-    mov eax, r15d
-    sub eax, [rbp - 100]
-    mov [inc_pawn_score], eax
-    mov byte [inc_pawn_dirty], 0
-    mov byte [inc_passed_clean], 1
-.ps_done:
 
     ; --- veze: open/semi-open file, 7. rank ---
     xor r12, r12
@@ -1440,7 +1231,7 @@ evaluate:
     mov rdi, [rsi + rbx*8]     ; rbx = file of rook
     test r13d, r13d
     jnz .rook_behind_b          ; len biela veza
-    mov rax, [inc_passed_w]         ; passed white bitmask
+    mov rax, [passed_w]         ; passed white bitmask
     and rax, rdi                ; biely passer na rovnakom file?
     jz .rook_next
     bsf rcx, rax                ; najdi passera
@@ -1458,7 +1249,7 @@ evaluate:
     jz .rook_next               ; len cierna veza
     lea rsi, [file_masks]
     mov rdi, [rsi + rbx*8]
-    mov rax, [inc_passed_b]         ; passed black bitmask
+    mov rax, [passed_b]         ; passed black bitmask
     and rax, rdi
     jz .rook_next
     bsf rcx, rax
