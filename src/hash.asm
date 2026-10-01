@@ -1140,6 +1140,171 @@ compute_hash:
     ret
 
 ; ============================================================
+; E10/F2: inkrementalny Zobrist delta — search make/unmake namiesto
+; plneho compute_hash. XOR je samoinverzny: funkcie sa volaju v make
+; aj unmake identicky (rovnake kluce, rovnaky vysledok).
+; Pozor: v unmake su r8-r11 live -> clobbruje len rax/rcx/rdx/rsi/rdi.
+; ============================================================
+
+global hash_delta_pieces, hash_delta_state
+extern moved_piece, captured_piece, promo_pieces
+
+; ------------------------------------------------------------
+; hash_xor_piece - XOR zobrist kluca figurky do position_hash
+; Vstup: ecx = piece bajt, esi = sq
+; Clobbers: rax, rdx, rdi
+; ------------------------------------------------------------
+hash_xor_piece:
+    mov eax, ecx
+    and eax, 0xF
+    shl eax, 6
+    add eax, esi
+    lea rdi, [zobrist_keys]
+    mov rdx, [rdi + rax*8]
+    xor [position_hash], rdx
+    ret
+
+; ------------------------------------------------------------
+; hash_delta_pieces - figurkova delta tahu
+; Vstup: ax = 16-bitovy tah; moved_piece/captured_piece nastavene
+;   (make: po apply_move; unmake: z undo zaznamu)
+; XOR: out moved@from, in (promo?nova:moved)@to, out captured@cap_sq,
+;      out rook@rfrom + in rook@rto (rosada)
+; ------------------------------------------------------------
+hash_delta_pieces:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8                   ; zarovnanie (5 pushov + ret = misaligned)
+    movzx r12d, ax
+    and r12d, 0x3F               ; from
+    mov r13d, eax
+    shr r13d, 6
+    and r13d, 0x3F               ; to
+    mov r14d, eax
+    shr r14d, 12                 ; flags
+    ; hybana figurka: out @from, in @to
+    movzx r15d, byte [moved_piece]
+    mov ebx, r15d
+    cmp r14d, FLAG_PROMO_Q
+    jb .np
+    cmp r14d, FLAG_PROMO_N
+    ja .np
+    lea rcx, [promo_pieces]
+    movzx ebx, byte [rcx + r14]
+    movzx ecx, byte [moved_piece]
+    and ecx, COLOR_MASK
+    or ebx, ecx
+.np:
+    mov ecx, r15d
+    mov esi, r12d
+    call hash_xor_piece          ; out moved @ from
+    mov ecx, ebx
+    mov esi, r13d
+    call hash_xor_piece          ; in (promo/norm) @ to
+    ; brana figurka: out @cap_sq (cap_sq = to, pri EP to-+8)
+    movzx ecx, byte [captured_piece]
+    test ecx, ecx
+    jz .castle
+    mov esi, r13d
+    cmp r14d, FLAG_ENPASSANT
+    jne .cap_go
+    movzx eax, byte [moved_piece]
+    test eax, COLOR_MASK
+    jnz .ep_b
+    sub esi, 8
+    jmp .cap_go
+.ep_b:
+    add esi, 8
+.cap_go:
+    call hash_xor_piece
+.castle:
+    cmp r14d, FLAG_CASTLE
+    jne .done
+    cmp r13d, 6
+    je .rwk
+    cmp r13d, 2
+    je .rwq
+    cmp r13d, 62
+    je .rbk
+    cmp r13d, 58
+    je .rbq
+    jmp .done
+.rwk:
+    mov esi, 7
+    mov edi, 5
+    jmp .rook
+.rwq:
+    mov esi, 0
+    mov edi, 3
+    jmp .rook
+.rbk:
+    mov esi, 63
+    mov edi, 61
+    jmp .rook
+.rbq:
+    mov esi, 56
+    mov edi, 59
+.rook:
+    movzx ecx, byte [moved_piece]
+    and ecx, COLOR_MASK
+    or ecx, ROOK
+    call hash_xor_piece          ; out rook @ rfrom
+    mov esi, edi
+    call hash_xor_piece          ; in rook @ rto
+.done:
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ------------------------------------------------------------
+; hash_delta_state - delta stavovych klucov (strana, rosada, EP)
+; XOR klucov pre AKTUALNE hodnoty [side]/[castle]/[enpassant].
+; Volat raz pred zmenou stavu a raz po nej (make aj unmake).
+; Clobbers: rax, rcx, rdx, rdi
+; ------------------------------------------------------------
+hash_delta_state:
+    ; strana na tahu (kluc len pre ciernu, ako v compute_hash)
+    movzx eax, byte [side]
+    test eax, eax
+    jz .no_side
+    lea rdi, [zobrist_keys + (16*64)*8]
+    mov rdx, [rdi]
+    xor [position_hash], rdx
+.no_side:
+    ; prava rosady (bity 0..3)
+    movzx eax, byte [castle]
+    lea rdi, [zobrist_keys + (16*64 + 1)*8]
+    xor ecx, ecx
+.castle_loop:
+    cmp ecx, 4
+    jae .castle_done
+    bt eax, ecx
+    jnc .castle_next
+    mov rdx, [rdi + rcx*8]
+    xor [position_hash], rdx
+.castle_next:
+    inc ecx
+    jmp .castle_loop
+.castle_done:
+    ; en passant stlpec
+    movzx eax, byte [enpassant]
+    cmp eax, 255
+    je .ep_done
+    and eax, 7
+    lea rdi, [zobrist_keys + (16*64 + 1 + 4)*8]
+    mov rdx, [rdi + rax*8]
+    xor [position_hash], rdx
+.ep_done:
+    ret
+
+; ============================================================
 ; init_hash_history - vynuluje historiu hashov
 ; ============================================================
 init_hash_history:

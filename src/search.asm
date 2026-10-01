@@ -71,6 +71,7 @@ section .bss
 
 undo_stack:     resb 64*16      ; miesto pre 64 undo zaznamov
 undo_sp:        resq 1          ; offset (v bajtoch) do undo_stack
+nnue_delta_applied: resb 1      ; E10/F2: nnue2_move_delta(_inv) vratil 1
 search_timespec: resq 2
 search_ply:     resq 1          ; vzdialenost od rootu (pre mat skore + kille)
 killers:        resd 2*64       ; dva killer tahy na kazdy ply
@@ -124,6 +125,8 @@ extern pst_runtime_mg, pst_runtime_eg
 extern promo_pieces, moved_piece, captured_piece
 extern see
 extern compute_hash
+extern hash_delta_pieces, hash_delta_state
+extern nnue2_move_delta, nnue2_move_delta_inv, nnue_acc_hash
 extern tt_probe, tt_store, position_hash
 extern check_repetition
 extern hash_history, hash_count
@@ -705,14 +708,31 @@ make_move:
     mov al, [captured_piece]
     mov [r12 + 4], al
 
+    ; E10/F2: NNUE acc delta (+ undo +11..15); MUSI byt pred akymkolvek
+    ; zasahom do position_hash (kontroluje acc_hash == position_hash)
+    mov rax, r15
+    mov rdi, r12
+    call nnue2_move_delta
+    mov [nnue_delta_applied], al
+
+    ; E10/F2: hash delta — XOR out stare stavove kluce (side/castle/EP sa
+    ; zmeni az v update_position_state)
+    call hash_delta_state
+    mov rax, r15
+    call hash_delta_pieces
+
     mov rax, r15
     call update_position_state
 
-    push r14
-    push r15
-    call compute_hash
-    pop r15
-    pop r14
+    ; E10/F2: hash delta — XOR in nove stavove kluce; plny compute_hash
+    ; netreba. acc_hash synchronizujeme LEN ak sa NNUE delta aplikovala
+    ; (inak acc zostava nepplatny a eval spravi refresh).
+    call hash_delta_state
+    cmp byte [nnue_delta_applied], 0
+    je .acc_sync_done            ; delta sa NEaplikovala -> acc nepplatny
+    mov rax, [position_hash]
+    mov [nnue_acc_hash], rax
+.acc_sync_done:
 
     ; inkrementalny eval cache: delta update (unmake robi inverznu deltu,
     ; snapshot netreba)
@@ -764,21 +784,58 @@ unmake_move:
     movzx rbx, byte [r12 + 8]   ; halfmove
     movzx rax, word [r12 + 9]   ; fullmove
 
+    ; nacitaj tahove informacie
+    movzx r15, byte [r12 + 3]   ; moved_piece
+    movzx r14, byte [r12 + 4]   ; captured_piece
+
+    mov [moved_piece], r15b
+    mov [captured_piece], r14b
+
+    ; zrekonstruuj tah (from/to/flags) do r14 — len rcx/r13, rax (fullmove)
+    ; sa nesmie prepisat (captured_piece je globalne aj v undo +4)
+    movzx r13, byte [r12 + 0]   ; from
+    movzx ecx, byte [r12 + 1]   ; to (base v r12 este pouzitelny)
+    shl ecx, 6
+    mov r14d, r13d
+    or r14d, ecx
+    mov ecx, r8d
+    shl ecx, 12
+    or r14d, ecx                ; tah
+
+    ; E10/F2: inverzny NNUE acc delta — MUSI byt pred hash zmenami
+    ; (position_hash je este post-move == acc_hash); rdi = undo base.
+    ; delta funkcie clobruju r8-r11 -> push okolo (r8=flags, r9-r11=stav).
+    mov rdi, r12
+    push r8
+    push r9
+    push r10
+    push r11
+    push rax                     ; zarovnanie (11 pushov -> 16B)
+    mov eax, r14d
+    call nnue2_move_delta_inv
+    mov [nnue_delta_applied], al
+    mov eax, r14d
+    call hash_delta_pieces      ; XOR figurkovych klucov (samoinverzne)
+    pop rax
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+
+    movzx r14, byte [r12 + 4]   ; captured_piece (znova)
+    movzx r12d, byte [r12 + 1]  ; to (prepise base)
+
+    ; E10/F2: hash delta — XOR out post-move stavove kluce
+    push r8
+    call hash_delta_state
+    pop r8
+
     ; uloz stav spat do pamate
     mov [side], r9b
     mov [castle], r10b
     mov [enpassant], r11b
     mov [halfmove], bl
     mov [fullmove], ax
-
-    ; nacitaj tahove informacie
-    movzx r15, byte [r12 + 3]   ; moved_piece
-    movzx r14, byte [r12 + 4]   ; captured_piece
-    movzx r13, byte [r12 + 0]   ; from
-    movzx r12d, byte [r12 + 1]  ; to (prepise base)
-
-    mov [moved_piece], r15b
-    mov [captured_piece], r14b
 
     ; inverzna delta eval cache (ax = zrekonstruovany tah z undo zaznamu;
     ; revert sa musi urobit tu, lebo .undo_ep/.undo_castle menia r12)
@@ -850,10 +907,18 @@ unmake_move:
 .done:
     ; E10/F1 invariant: bb stav konzistentny s obnovenym board[64]
     call pos_bb_init
-    ; prepocitaj hash obnovenej pozicie (vzdy, na vsetkych cestach)
-    ; pozor: telo unmake_move prepisalo rax, povodna hodnota je na stacku
-    call compute_hash
-    pop rax
+    ; E10/F2: hash delta — XOR in obnovene (stare) stavove kluce; plny
+    ; compute_hash netreba. acc_hash synchronizujeme len ak sa inverzna
+    ; NNUE delta aplikovala (inak acc zostava nepplatny -> refresh v eval).
+    push rax
+    call hash_delta_state
+    cmp byte [nnue_delta_applied], 0
+    je .acc_sync_done            ; delta sa NEaplikovala -> acc nepplatny
+    mov rax, [position_hash]
+    mov [nnue_acc_hash], rax
+.acc_sync_done:
+    pop rax                     ; sparovanie s push rax pred state delta
+    pop rax                     ; entry: povodna hodnota pre volajuceho
 
     pop r15
     pop r14

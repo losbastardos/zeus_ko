@@ -27,6 +27,7 @@ DEFAULT REL
 %define NNUE_VERSION  1
 %define NNUE_FILESIZE (8 + 4*6*64*2)
 
+
 section .bss
 nnue_buf: resb NNUE_FILESIZE
 
@@ -157,12 +158,21 @@ nnue_load:
 ; ============================================================
 
 %define NNUE2_F 768
+%define NNUE2_MAXH 256
 
 section .bss
 nnue2_buf:   resb 150000
 nnue2_ready: resb 1
+; Perzistentny akumulator (E10/F2): acc[perspektiva 0/1][j] int32,
+; perspektiva = strana, z ktorej pohladu su featury (0 = biela, 1 = cierna).
+; nnue_acc_hash = position_hash pozicie, pre ktoru je acc platny
+; (pokial sa nezhoduje, eval robi refresh; sluzi aj ako invalidacia
+; pri FEN/init/UI tahoch, ktore menia board mimo make/unmake).
+nnue_accum:     resd 2*NNUE2_MAXH
+nnue_acc_valid: resb 1
+nnue_acc_hash:  resq 1
 
-global nnue2_ready
+global nnue2_ready, nnue_acc_valid, nnue_acc_hash
 
 section .data
 nnue2_H:      dd 0
@@ -171,7 +181,9 @@ nnue2_shift2: dd 0
 
 section .text
 global nnue2_load, nnue2_eval
-extern board, side
+global nnue2_feature_idx, nnue2_refresh
+global nnue2_move_delta, nnue2_move_delta_inv
+extern board, side, position_hash, moved_piece, captured_piece, promo_pieces
 
 ; ============================================================
 ; nnue2_load - nacita net v2 do buffra
@@ -220,20 +232,247 @@ nnue2_load:
     ret
 
 ; ============================================================
-; nnue2_eval - forward pass, Vystup: eax = eval cp (STM perspektiva)
+; nnue2_feature_idx - feature index jednej figurky
+; Vstup:  eax = sq (0..63), ecx = piece bajt (typ|farba), edx = strana
+;         perspektivy (0 biela / 1 cierna)
+; Vystup: eax = idx 0..767
+;   non-king: (own*5 + typ-1)*64 + rel_sq ; king: 640 + own*64 + rel_sq
+;   own = (farba figury == perspektiva) ? 0 : 1
+;   rel_sq = sq ^ 56 ak je perspektiva cierna
+; Clobbers: rax, rcx, rdx, rsi (iba caller-saved)
 ; ============================================================
-nnue2_eval:
+nnue2_feature_idx:
+    mov esi, eax                 ; rel_sq = sq
+    test edx, edx
+    jz .rsq_ok
+    xor esi, 56
+.rsq_ok:
+    mov eax, ecx
+    and eax, COLOR_MASK
+    shr eax, 3                   ; farba figury 0/1
+    xor eax, edx                 ; own
+    and ecx, PIECE_MASK          ; typ 1..6
+    cmp ecx, KING
+    je .king
+    dec ecx                      ; typ-1 0..4
+    imul eax, eax, 5
+    add eax, ecx                 ; own*5 + typ-1
+    shl eax, 6                   ; *64
+    add eax, esi
+    ret
+.king:
+    shl eax, 6                   ; own*64
+    add eax, 640
+    add eax, esi
+    ret
+
+; ============================================================
+; nnue2_acc_delta - delta akumulatora pre jednu perspektivu
+; Vstup:  eax = added idx (-1 = ziaden), ecx = removed idx (-1 = ziaden),
+;         edx = perspektiva (0/1)
+;   acc[edx][j] += W1[added*H+j] - W1[removed*H+j], j = 0..H-1
+; Clobbers: rax, rcx, rdx, rsi, rdi, r8-r11 (rbx zachovane)
+; ============================================================
+nnue2_acc_delta:
+    push rbx
+    mov r8d, [nnue2_H]           ; H
+    mov r9d, edx
+    shl r9d, 10                  ; persp * (MAXH*4)
+    lea rdi, [nnue_accum]
+    add rdi, r9                  ; acc riadok perspektivy
+    mov r10d, r8d
+    shl r10d, 2
+    lea r11, [nnue2_buf + 20]
+    add r11, r10                 ; W1 base
+    ; vyber variantu este pred imul (eax/ecx sa prepisu)
+    test eax, eax
+    js .chk_rem
+    test ecx, ecx
+    js .only_add
+    ; obidva: priprav oba riadky
+    imul eax, r8d
+    lea rsi, [r11 + rax*2]       ; W1 riadok added
+    imul ecx, r8d
+    lea r10, [r11 + rcx*2]       ; W1 riadok removed
+    xor edx, edx
+.loop_both:
+    cmp edx, r8d
+    jae .done
+    movsx eax, word [rsi + rdx*2]
+    movsx ebx, word [r10 + rdx*2]
+    sub eax, ebx
+    add [rdi + rdx*4], eax
+    inc edx
+    jmp .loop_both
+.chk_rem:
+    test ecx, ecx
+    jns .only_rem
+    jmp .done                    ; oba -1: nic
+.only_add:
+    imul eax, r8d
+    lea rsi, [r11 + rax*2]
+    xor edx, edx
+.loop_add:
+    cmp edx, r8d
+    jae .done
+    movsx eax, word [rsi + rdx*2]
+    add [rdi + rdx*4], eax
+    inc edx
+    jmp .loop_add
+.only_rem:
+    imul ecx, r8d
+    lea r10, [r11 + rcx*2]
+    xor edx, edx
+.loop_rem:
+    cmp edx, r8d
+    jae .done
+    movsx eax, word [r10 + rdx*2]
+    sub [rdi + rdx*4], eax
+    inc edx
+    jmp .loop_rem
+.done:
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_delta_both - delta pary figuriek pre OBE perspektivy
+; Vstup:  esi = from sq, edi = to sq, ecx = removed piece, r8d = added piece
+;   acc[p] += W1[idx(to,added,p)] - W1[idx(from,removed,p)] pre p=0,1
+; Clobbers: caller-saved + rbx (pushuje si)
+; ============================================================
+nnue2_delta_both:
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8                   ; [rsp] = docasny idx
+    mov r12d, esi                ; from
+    mov r13d, edi                ; to
+    mov r14d, ecx                ; removed piece
+    mov ebx, r8d                 ; added piece
+    ; --- perspektiva 0 ---
+    mov eax, r13d
+    mov ecx, ebx
+    xor edx, edx
+    call nnue2_feature_idx
+    mov [rsp], rax               ; added idx
+    mov eax, r12d
+    mov ecx, r14d
+    xor edx, edx
+    call nnue2_feature_idx       ; eax = removed idx
+    mov ecx, eax
+    mov eax, [rsp]
+    xor edx, edx
+    call nnue2_acc_delta
+    ; --- perspektiva 1 ---
+    mov eax, r13d
+    mov ecx, ebx
+    mov edx, 1
+    call nnue2_feature_idx
+    mov [rsp], rax
+    mov eax, r12d
+    mov ecx, r14d
+    mov edx, 1
+    call nnue2_feature_idx
+    mov ecx, eax
+    mov eax, [rsp]
+    mov edx, 1
+    call nnue2_acc_delta
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_remove_both - odstranenie figurky z acc (OBE perspektivy)
+; Vstup: esi = sq, ecx = piece
+; ============================================================
+nnue2_remove_both:
+    push rbx
+    push r12
+    sub rsp, 8                   ; zarovnanie
+    mov r12d, esi
+    mov ebx, ecx
+    mov eax, r12d
+    mov ecx, ebx
+    xor edx, edx
+    call nnue2_feature_idx
+    mov ecx, eax
+    mov eax, -1
+    xor edx, edx
+    call nnue2_acc_delta
+    mov eax, r12d
+    mov ecx, ebx
+    mov edx, 1
+    call nnue2_feature_idx
+    mov ecx, eax
+    mov eax, -1
+    mov edx, 1
+    call nnue2_acc_delta
+    add rsp, 8
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_add_both - pridanie figurky do acc (OBE perspektivy)
+; Vstup: esi = sq, ecx = piece
+; ============================================================
+nnue2_add_both:
+    push rbx
+    push r12
+    sub rsp, 8                   ; zarovnanie
+    mov r12d, esi
+    mov ebx, ecx
+    mov eax, r12d
+    mov ecx, ebx
+    xor edx, edx
+    call nnue2_feature_idx
+    mov ecx, -1
+    xor edx, edx
+    call nnue2_acc_delta
+    mov eax, r12d
+    mov ecx, ebx
+    mov edx, 1
+    call nnue2_feature_idx
+    mov ecx, -1
+    mov edx, 1
+    call nnue2_acc_delta
+    add rsp, 8
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_refresh - plny recompute akumulatora z board[64] pre obe
+; perspektivy; acc_hash = position_hash, valid = 1
+; ============================================================
+nnue2_refresh:
     push rbx
     push r12
     push r13
     push r14
     push r15
-    sub rsp, 400                 ; acc[96] int32 (max H)
-    ; acc = b1q
     mov r15d, [nnue2_H]
-    lea rsi, [nnue2_buf + 20]    ; b1q
+    ; W1 base = buf + 20 + H*4
+    mov eax, r15d
+    shl eax, 2
+    lea r14, [nnue2_buf + 20]
+    add r14, rax                 ; r14 = W1q base
+    xor ebx, ebx                 ; perspektiva 0/1
+.persp_loop:
+    cmp ebx, 2
+    jae .fin
+    ; acc riadok = nnue_accum + persp*MAXH*4
+    mov eax, ebx
+    shl eax, 10
+    lea rdi, [nnue_accum]
+    add rdi, rax
+    ; acc = b1q
     mov rcx, r15
-    lea rdi, [rsp]
+    lea rsi, [nnue2_buf + 20]
 .copy_b1:
     mov eax, dword [rsi]
     mov dword [rdi], eax
@@ -241,70 +480,91 @@ nnue2_eval:
     add rdi, 4
     dec rcx
     jnz .copy_b1
-    ; W1 base = buf + 20 + H*4
-    mov eax, r15d
-    shl eax, 2                   ; H*4 (b1 offset)
-    lea r14, [nnue2_buf + 20]
-    add r14, rax                 ; r14 = W1q base
     ; scan board
-    lea rbx, [board]
+    lea r13, [board]
     xor r12, r12                 ; sq
 .sq_loop:
     cmp r12, 64
-    jae .activate
-    movzx eax, byte [rbx + r12]
-    test eax, eax
+    jae .persp_next
+    movzx ecx, byte [r13 + r12]
+    test ecx, ecx
     jz .sq_next
-    ; typ / farba
-    mov ecx, eax
-    and ecx, PIECE_MASK          ; typ 1..6
-    mov edx, eax
-    and edx, COLOR_MASK
-    shr edx, 3                   ; color_idx 0/1
-    movzx edi, byte [side]       ; 0/1
-    ; rel_sq: strana biela(0) -> sq ; cierna(1) -> sq^56
-    mov esi, r12d
-    cmp edi, 0
-    je .rsq_ok
-    xor esi, 56
-.rsq_ok:
-    ; own = (color_idx == side) ? 0 : 1
-    xor edx, edi                 ; 0 ak rovnake
-    ; feature idx -> rax
-    cmp ecx, KING
-    je .feat_king
-    dec ecx                      ; typ-1 0..4
-    imul eax, edx, 5
-    add eax, ecx                 ; own*5 + typ-1
-    shl eax, 6                   ; *64
-    add eax, esi
-    jmp .feat_done
-.feat_king:
-    mov eax, 640
-    shl edx, 6                   ; own*64
-    add eax, edx
-    add eax, esi
-.feat_done:
-    ; acc[j] += W1[idx*H + j]
+    mov eax, r12d
+    mov edx, ebx                 ; perspektiva
+    call nnue2_feature_idx       ; eax = idx
     imul eax, r15d               ; idx*H
-    lea rsi, [r14 + rax*2]       ; W1 riadok (int16)
-    xor ecx, ecx
+    lea rsi, [r14 + rax*2]       ; W1 riadok
+    mov r9d, ebx
+    shl r9d, 10
+    lea r8, [nnue_accum]
+    add r8, r9                   ; acc riadok perspektivy
+    xor edx, edx
 .acc_loop:
-    cmp ecx, r15d
+    cmp edx, r15d
     jae .sq_next
-    movsx edx, word [rsi + rcx*2]
-    add dword [rsp + rcx*4], edx
-    inc ecx
+    movsx ecx, word [rsi + rdx*2]
+    add [r8 + rdx*4], ecx
+    inc edx
     jmp .acc_loop
 .sq_next:
     inc r12
     jmp .sq_loop
-.activate:
-    ; h[j] = clip(acc>>shift1, 0, 255); sum h*W2q
-    ; W2 base = r14 + F*H*2 + 4 (za W1 nasleduje b2q i32, az potom W2q)
+.persp_next:
+    inc ebx
+    jmp .persp_loop
+.fin:
+    mov byte [nnue_acc_valid], 1
+    mov rax, [position_hash]
+    mov [nnue_acc_hash], rax
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_eval - forward pass z akumulatora
+; Vstup:  nnue_acc_valid + zhoda nnue_acc_hash s position_hash urcuju
+;         platnost acc; inak sa spravi refresh
+; Vystup: eax = eval cp (STM perspektiva) — identicky vystup ako doteraz
+; ============================================================
+nnue2_eval:
+    cmp byte [nnue_acc_valid], 1
+    jne .refresh
+    mov rax, [nnue_acc_hash]
+    cmp rax, [position_hash]
+    je .have_acc
+.refresh:
+    call nnue2_refresh
+.have_acc:
+    jmp nnue2_fwd
+
+; ============================================================
+; nnue2_fwd - forward pass (CReLU -> W2 -> b2 -> shift2) z acc
+; Vystup: eax = eval cp (STM perspektiva)
+; ============================================================
+nnue2_fwd:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    mov r15d, [nnue2_H]
+    ; acc riadok strany na tahu
+    movzx eax, byte [side]
+    shl eax, 10
+    lea r13, [nnue_accum]
+    add r13, rax                 ; r13 = acc[side]
+    ; W1 base = buf + 20 + H*4
+    mov eax, r15d
+    shl eax, 2
+    lea r14, [nnue2_buf + 20]
+    add r14, rax
+    ; W2 base = W1 + F*H*2 + 4 (za W1 nasleduje b2q i32, az potom W2q)
     mov eax, NNUE2_F
     imul eax, r15d               ; F*H
-    lea rsi, [r14 + rax*2 + 4]   ; W2q (posun cez b2q i32)
+    lea rsi, [r14 + rax*2 + 4]   ; W2q
     mov ebx, eax
     shl ebx, 1
     lea rdi, [r14 + rbx]         ; b2q (int32)
@@ -314,7 +574,7 @@ nnue2_eval:
 .out_loop:
     cmp r12, r15
     jae .finish
-    mov eax, dword [rsp + r12*4]
+    mov eax, dword [r13 + r12*4]
     sar eax, cl                  ; acc >> shift1
     cmp eax, 0
     jge .clip_hi
@@ -324,7 +584,6 @@ nnue2_eval:
     jle .clip_ok
     mov eax, 255
 .clip_ok:
-    ; sum += h * W2q[j]
     movsx edx, word [rsi + r12*2]
     imul eax, edx
     add ebx, eax
@@ -334,7 +593,209 @@ nnue2_eval:
     mov ecx, [nnue2_shift2]
     sar ebx, cl
     mov eax, ebx
-    add rsp, 400
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; nnue2_move_delta / nnue2_move_delta_inv - inkrementalny update
+; akumulatora po tahu (make smer / inverzne pre unmake)
+; Vstup:  ax = 16-bitovy tah, rdi = undo zaznam base
+;   moved_piece / captured_piece musia byt nastavene:
+;     make:  po apply_move
+;     unmake: po nacitani z undo zaznamu (este pred board restore)
+; Vystup: eax = 1 ak sa delta aplikovala, inak 0 (acc neplatny — search
+;   nesmie synchronizovat acc_hash).
+; Delta sa aplikuje len ak je acc platny pre aktualnu poziciu
+; (nnue2_ready, valid, acc_hash == position_hash); inak sa acc necha
+; stary — eval spravi refresh.
+; Do undo zaznamu (+11..15) zapise removed/added idx (white-POV) + flags:
+;   +11..12 removed_idx (word), +13..14 added_idx (word),
+;   +15 flag bity (bit0 promo, bit1 capture, bit2 ep, bit3 castle)
+; ============================================================
+nnue2_move_delta:
+    cmp byte [nnue2_ready], 1
+    jne .skip
+    cmp byte [nnue_acc_valid], 1
+    jne .skip
+    xor edx, edx                 ; smer 0 = make
+    jmp nnue2_move_delta_core
+.skip:
+    xor eax, eax
+    ret
+
+nnue2_move_delta_inv:
+    cmp byte [nnue2_ready], 1
+    jne .skip
+    cmp byte [nnue_acc_valid], 1
+    jne .skip
+    mov edx, 1                   ; smer 1 = unmake
+    jmp nnue2_move_delta_core
+.skip:
+    xor eax, eax
+    ret
+
+; jadro: [rsp+8] = tah, [rsp+16] = smer, [rsp+24] = undo base
+nnue2_move_delta_core:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    push rdi
+    push rdx
+    push rax
+    sub rsp, 8                   ; zarovnanie (8 pushov + ret = misaligned)
+    ; platnost acc voci aktualnej pozicii (hash este nebol zmeneny)
+    mov rax, [nnue_acc_hash]
+    cmp rax, [position_hash]
+    jne .skip
+    movzx eax, word [rsp + 8]    ; tah
+    movzx r12d, ax
+    and r12d, 0x3F               ; from
+    mov r13d, eax
+    shr r13d, 6
+    and r13d, 0x3F               ; to
+    mov r14d, eax
+    shr r14d, 12                 ; flags
+    ; undo +15: flag bity (bit0 promo, bit1 capture, bit2 ep, bit3 castle)
+    xor ecx, ecx
+    cmp r14d, FLAG_PROMO_Q
+    jb .f1
+    cmp r14d, FLAG_PROMO_N
+    ja .f1
+    or ecx, 1
+.f1:
+    movzx r15d, byte [captured_piece]
+    test r15d, r15d
+    jz .f2
+    or ecx, 2
+    cmp r14d, FLAG_ENPASSANT
+    jne .f2
+    or ecx, 4
+.f2:
+    cmp r14d, FLAG_CASTLE
+    jne .f3
+    or ecx, 8
+.f3:
+    mov rax, [rsp + 24]
+    mov [rax + 15], cl
+    ; removed = moved_piece (at from); added = promo ? nova figurka : moved (at to)
+    movzx r15d, byte [moved_piece]
+    mov ebx, r15d
+    cmp r14d, FLAG_PROMO_Q
+    jb .np
+    cmp r14d, FLAG_PROMO_N
+    ja .np
+    lea rcx, [promo_pieces]
+    movzx ebx, byte [rcx + r14]
+    movzx ecx, byte [moved_piece]
+    and ecx, COLOR_MASK
+    or ebx, ecx
+.np:
+    ; undo +11..14: white-POV (perspektiva 0) idx
+    mov eax, r12d
+    mov ecx, r15d
+    xor edx, edx
+    call nnue2_feature_idx
+    mov rcx, [rsp + 24]
+    mov [rcx + 11], ax           ; removed idx
+    mov eax, r13d
+    mov ecx, ebx
+    xor edx, edx
+    call nnue2_feature_idx
+    mov rcx, [rsp + 24]
+    mov [rcx + 13], ax           ; added idx
+    ; par hybanej figurky: make from->to, unmake to->from
+    cmp qword [rsp + 16], 0
+    jne .inv_pair
+    mov esi, r12d
+    mov edi, r13d
+    mov ecx, r15d
+    mov r8d, ebx
+    call nnue2_delta_both
+    jmp .cap
+.inv_pair:
+    mov esi, r13d
+    mov edi, r12d
+    mov ecx, ebx
+    mov r8d, r15d
+    call nnue2_delta_both
+.cap:
+    ; brana figurka (cap sq = to, pri EP to-+8 podla farby hybacej)
+    movzx ecx, byte [captured_piece]
+    test ecx, ecx
+    jz .castle
+    mov esi, r13d
+    cmp r14d, FLAG_ENPASSANT
+    jne .cap_go
+    movzx eax, byte [moved_piece]
+    test eax, COLOR_MASK
+    jnz .ep_b
+    sub esi, 8
+    jmp .cap_go
+.ep_b:
+    add esi, 8
+.cap_go:
+    cmp qword [rsp + 16], 0
+    jne .cap_inv
+    call nnue2_remove_both
+    jmp .castle
+.cap_inv:
+    call nnue2_add_both
+.castle:
+    cmp r14d, FLAG_CASTLE
+    jne .done
+    cmp r13d, 6
+    je .rwk
+    cmp r13d, 2
+    je .rwq
+    cmp r13d, 62
+    je .rbk
+    cmp r13d, 58
+    je .rbq
+    jmp .done
+.rwk:
+    mov esi, 7
+    mov edi, 5
+    jmp .rook
+.rwq:
+    mov esi, 0
+    mov edi, 3
+    jmp .rook
+.rbk:
+    mov esi, 63
+    mov edi, 61
+    jmp .rook
+.rbq:
+    mov esi, 56
+    mov edi, 59
+.rook:
+    movzx ecx, byte [moved_piece]
+    and ecx, COLOR_MASK
+    or ecx, ROOK                 ; veza = removed aj added
+    cmp qword [rsp + 16], 0
+    jne .rook_inv
+    mov r8d, ecx
+    call nnue2_delta_both
+    jmp .done
+.rook_inv:
+    mov r8d, ecx
+    xchg esi, edi                ; inverzne poradie from/to
+    call nnue2_delta_both
+.done:
+    mov eax, 1                   ; delta aplikovana
+    jmp .out
+.skip:
+    xor eax, eax                 ; delta preskocena (acc neplatny)
+.out:
+    add rsp, 8                   ; pad
+    add rsp, 8                   ; rax (vysledok sa neobnovuje)
+    pop rdx
+    pop rdi
     pop r15
     pop r14
     pop r13
