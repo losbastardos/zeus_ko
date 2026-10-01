@@ -11,6 +11,7 @@ chess-static-*
 
 # dáta / knižnice / venv
 book.book
+chess-openings/
 games.pgn
 uci_debug.log
 commands_debug.log
@@ -55,6 +56,10 @@ utils/*
 !utils/syzygy_alias_links.sh
 !utils/syzygy_oracle.py
 !utils/tb_verify_3piece.sh
+!utils/eco_build.py
+!utils/eco_validate.py
 net.nnue
 net2.nnue
+net2.nnue.bak
+tests/tuning/sprt_env/chess-sprt
 .superpowers/
