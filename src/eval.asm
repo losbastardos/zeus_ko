@@ -138,7 +138,7 @@ lo_rank_masks:
 section .text
 
 extern board
-extern side, eval_mode
+extern side, eval_mode, fullmove
 extern nnue2_eval, nnue2_ready
 extern prof_evals
 extern moved_piece, captured_piece, promo_pieces
@@ -386,6 +386,87 @@ evaluate:
     cmp byte [nnue2_ready], 1
     jne .classic_eval
     call nnue2_eval
+    ; nnue2_eval vracia skore z pohladu strany na tahu (STM),
+    ; evaluate vsak drzi kontrakt skore z pohladu bieleho.
+    movzx ecx, byte [side]
+    test ecx, ecx
+    jz .nnue_white_pov
+    neg eax
+
+.nnue_white_pov:
+    ; low-confidence fallback: v openingu pri velmi plochom NNUE skore
+    ; (< 0.96 pešiaka) pouzi classic eval, aby sa rozlisili planove tahy.
+    mov edx, eax
+    movzx ecx, word [fullmove]
+    cmp ecx, 20
+    ja .nnue_use
+    mov ecx, edx
+    test ecx, ecx
+    jns .nnue_abs_ready
+    neg ecx
+.nnue_abs_ready:
+    cmp ecx, 96
+    jle .classic_eval
+.nnue_use:
+    mov eax, edx
+
+    ; nevyrošádovaný kral na e-file (s rookom stale na h-file):
+    ; jemny, ale citelny post-korekčný malus pre NNUE hodnotenie.
+    lea rbx, [board]
+    movzx ecx, byte [rbx + 4]       ; e1
+    cmp ecx, KING | WHITE
+    jne .nnue_w_e2
+    movzx ecx, byte [rbx + 7]       ; h1
+    cmp ecx, ROOK | WHITE
+    jne .nnue_w_e2
+    sub eax, 64
+.nnue_w_e2:
+    movzx ecx, byte [rbx + 12]      ; e2
+    cmp ecx, KING | WHITE
+    jne .nnue_b_e8
+    movzx ecx, byte [rbx + 7]       ; h1
+    cmp ecx, ROOK | WHITE
+    jne .nnue_b_e8
+    sub eax, 48
+
+.nnue_b_e8:
+    movzx ecx, byte [rbx + 60]      ; e8
+    cmp ecx, KING | BLACK
+    jne .nnue_b_e7
+    movzx ecx, byte [rbx + 63]      ; h8
+    cmp ecx, ROOK | BLACK
+    jne .nnue_b_e7
+    add eax, 64
+.nnue_b_e7:
+    movzx ecx, byte [rbx + 52]      ; e7
+    cmp ecx, KING | BLACK
+    jne .nnue_kf_fix
+    movzx ecx, byte [rbx + 63]      ; h8
+    cmp ecx, ROOK | BLACK
+    jne .nnue_kf_fix
+    add eax, 48
+
+    ; jemna korekcia: netrestat realnu rošádu, ale penalizovat
+    ; manualny krok Kf1/Kf8 s rookom stale na h-file.
+.nnue_kf_fix:
+    movzx ecx, byte [rbx + 5]       ; f1
+    cmp ecx, KING | WHITE
+    jne .nnue_b_fix
+    movzx ecx, byte [rbx + 7]       ; h1
+    cmp ecx, ROOK | WHITE
+    jne .nnue_b_fix
+    sub eax, 24
+
+.nnue_b_fix:
+    movzx ecx, byte [rbx + 61]      ; f8
+    cmp ecx, KING | BLACK
+    jne .nnue_done
+    movzx ecx, byte [rbx + 63]      ; h8
+    cmp ecx, ROOK | BLACK
+    jne .nnue_done
+    add eax, 24
+
+.nnue_done:
     jmp .neg_done_early
 
 .classic_eval:
@@ -702,15 +783,16 @@ evaluate:
     jmp .ks_b_fx_loop
 .ks_b_done:
 
-    ; castled shelter (MG): krale na f/g/h1 resp. f/g/h8
-    ; ciel: silnejsie trestat oslabenie rošádovej bariéry (hlavne g/h push)
-    ; --- biely castled king (f1/g1/h1) ---
+    ; castled shelter (MG): iba realna kratka rošáda
+    ; (biely: Kg1 + Rf1, cierny: Kg8 + Rf8).
+    ; Neodmenujeme manualny krok krala (napr. Ke1-f1), ktory
+    ; predtym dostaval rovnaky shelter bonus ako rošáda.
+    ; --- biely short-castled king (Kg1 + Rf1) ---
     mov eax, [rbp - 64]
-    cmp eax, 5                  ; f1
-    je .ks_wc_apply
     cmp eax, 6                  ; g1
-    je .ks_wc_apply
-    cmp eax, 7                  ; h1
+    jne .ks_bc_check
+    movzx ecx, byte [rbx + 5]   ; f1
+    cmp ecx, ROOK | WHITE
     jne .ks_bc_check
 .ks_wc_apply:
     ; f2 = 13, g2 = 14, h2 = 15
@@ -738,14 +820,13 @@ evaluate:
 .ks_wc_h_ok:
     add r15d, CASTLE_SHELTER_BONUS
 
-    ; --- cierny castled king (f8/g8/h8) ---
+    ; --- cierny short-castled king (Kg8 + Rf8) ---
 .ks_bc_check:
     mov eax, [rbp - 68]
-    cmp eax, 61                 ; f8
-    je .ks_bc_apply
     cmp eax, 62                 ; g8
-    je .ks_bc_apply
-    cmp eax, 63                 ; h8
+    jne .ks_castle_done
+    movzx ecx, byte [rbx + 61]  ; f8
+    cmp ecx, ROOK | BLACK
     jne .ks_castle_done
 .ks_bc_apply:
     ; f7 = 53, g7 = 54, h7 = 55

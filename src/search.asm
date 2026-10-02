@@ -48,6 +48,9 @@ DEFAULT REL
 %ifndef ENABLE_SINGULAR
 %define ENABLE_SINGULAR 1
 %endif
+%ifndef ENABLE_CORR_HISTORY
+%define ENABLE_CORR_HISTORY 1
+%endif
 
 ; Search pruning konstanty (E9)
 RAZOR_MARGIN    equ 250         ; razoring: eval + margin < alpha pri depth 1
@@ -92,6 +95,9 @@ asp_use:        resd 1          ; 1 = pouzi asp window (nastavuje uci_go)
 asp_retry:      resd 1          ; pocet aspiration re-search retry
 asp_prev_depth: resd 1          ; hlbska z predch. iteracie (kontrola continuity ID)
 root_alpha:     resd 1          ; aktualne alpha v root slucke
+root_trace_count:  resd 1       ; diagnostika: pocet top root kandidatov (max 5)
+root_trace_moves:  resw 5       ; diagnostika: root tahy (zoradene podla skore)
+root_trace_scores: resd 5       ; diagnostika: root skore (zoradene zostupne)
 smp_worker_mode: resd 1         ; 1 = volanie z helper procesu (rovno do single rezimu)
 smp_child_pids:    resq 8
 
@@ -101,13 +107,15 @@ prof_evals:     resq 1          ; volania evaluate
 prof_movegen:   resq 1          ; volania generate_all_moves
 prof_makes:     resq 1          ; volania make_move
 prof_unmakes:   resq 1          ; volania unmake_move
+prof_allprune:  resq 1          ; all-prune fallbacky v negamax
 
 section .text
 
 global make_move, unmake_move, quiescence, negamax, search_best_move, perft
 global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
+global root_trace_count, root_trace_moves, root_trace_scores
 global smp_worker_mode, smp_child_pids
-global prof_qnodes, prof_evals, prof_movegen, prof_makes, prof_unmakes
+global prof_qnodes, prof_evals, prof_movegen, prof_makes, prof_unmakes, prof_allprune
 
 extern board, side, castle, enpassant, halfmove, fullmove
 extern moved_piece, captured_piece
@@ -943,6 +951,7 @@ negamax:
     mov [rbp - 40], rcx     ; allow_null
     mov dword [rbp - 48], -32000  ; tt_score pre singular (NONE)
     mov dword [rbp - 72], 0       ; singular_move = 0 (nie sme v singular sub-searchi)
+    mov dword [rbp - 76], 0       ; pocet realne prehladanych child tahov (anti all-prune fallback)
 
     cmp qword [rbp - 8], 0
     jne .not_leaf
@@ -1209,6 +1218,7 @@ negamax:
     mov dword [rbp - 68], ecx
 
     ; correction history: jemna korekcia static eval podla hash bucketu
+%if ENABLE_CORR_HISTORY = 1
     movzx eax, byte [side]
     shl eax, 10                     ; side * 1024
     mov r8, [position_hash]
@@ -1218,6 +1228,7 @@ negamax:
     mov edx, dword [r8 + rax*4]
     sar edx, 6                      ; CP*64 -> CP
     add ecx, edx
+%endif
 .eval_ready:
     mov [rbp - 56], ecx             ; static eval (EVAL_NONE v sachu)
     mov rax, [search_ply]
@@ -1735,6 +1746,8 @@ negamax:
     ; --- SEE PRUNING BRANI v hlavnom searchi ---
     ; Pri !in_check preskoc zjavne prehravajuce brania (negativne SEE),
     ; aby sa nefixovali samovrazedne obete do PV.
+    cmp dword [rbp - 76], 0
+    je .no_cap_see_prune
     cmp dword [rbp - 44], 0
     jne .no_cap_see_prune
     cmp r12d, 1                 ; quiet tahy riesi nizsie quiet SEE prune
@@ -1790,6 +1803,8 @@ negamax:
 %if ENABLE_LMP = 0
     jmp .no_lmp
 %endif
+    cmp dword [rbp - 76], 0
+    je .no_lmp
     cmp r12d, 1
     jne .no_lmp
     cmp dword [rbp - 44], 0
@@ -1811,6 +1826,8 @@ negamax:
 %if ENABLE_FUTILITY = 0
     jmp .no_futility
 %endif
+    cmp dword [rbp - 76], 0
+    je .no_futility
     cmp r12d, 1
     jne .no_futility
     cmp dword [rbp - 44], 0
@@ -1837,6 +1854,8 @@ negamax:
     ; --- SEE PRUNING tichych tahov: tiche tahy stracajuce material ---
     ; !in_check && quiet && depth <= 4 && index >= 1 && alpha daleko od
     ; matu && see(tah) < -50*depth (figura skonci en prise bez kompenzacie)
+    cmp dword [rbp - 76], 0
+    je .no_see_prune
     cmp r12d, 1
     jne .no_see_prune
     cmp dword [rbp - 44], 0
@@ -2050,6 +2069,7 @@ negamax:
     call unmake_move
     pop rcx
     ; rcx je uz obnoven (nikdy sa neupravil v .after_search ceste bez pop)
+    inc dword [rbp - 76]
 
     cmp eax, ebx
     jle .alpha_update
@@ -2143,10 +2163,10 @@ negamax:
     movzx edi, ax
     and edi, 0x3F
     shl edi, 6
-    mov esi, eax
-    shr esi, 6
-    and esi, 0x3F
-    add edi, esi
+    mov ebx, eax
+    shr ebx, 6
+    and ebx, 0x3F
+    add edi, ebx
     add edi, r9d
     lea r9, [history]
     mov esi, dword [r9 + rdi*4]
@@ -2288,6 +2308,18 @@ negamax:
     jmp .move_loop
 
 .loop_done:
+    ; safeguard: ak heuristiky preskocili vsetky tahy, nevracaj -INF/INF cez alpha,
+    ; ale stabilny fallback zo static evaluacie.
+    cmp dword [rbp - 76], 0
+    jne .loop_scored
+    inc qword [prof_allprune]
+    mov eax, dword [rbp - 56]
+    cmp eax, EVAL_NONE
+    jne .neg_exit
+    mov eax, dword [rbp - 16]
+    jmp .neg_exit
+
+.loop_scored:
     cmp ebx, -INF
     jne .best_ok
     mov eax, dword [rbp - 16]
@@ -2295,6 +2327,7 @@ negamax:
 .best_ok:
     ; update correction history na realne prehladanych uzloch
     ; len pre EXACT uzly (bez fail-high/fail-low bound skreslenia)
+%if ENABLE_CORR_HISTORY = 1
     cmp ebx, dword [rbp - 32]
     jle .corr_done
     cmp ebx, dword [rbp - 24]
@@ -2339,6 +2372,7 @@ negamax:
     mov eax, -8192
 .corr_store:
     mov dword [r8 + rdx*4], eax
+%endif
 .corr_done:
 
     mov eax, ebx
@@ -2407,6 +2441,7 @@ search_best_move:
     mov qword [prof_movegen], 0
     mov qword [prof_makes], 0
     mov qword [prof_unmakes], 0
+    mov qword [prof_allprune], 0
     mov dword [search_last_score], 0
     mov qword [search_ply], 0
     mov qword [root_pv_len], 0   ; root PV zacina prazdna
@@ -2466,6 +2501,7 @@ search_best_move:
 
     mov r13, -INF           ; best score
     xor r14d, r14d          ; best move
+    mov dword [root_trace_count], 0
     xor rcx, rcx
     ; aspiration: ak nepoziadane, pouzi plne okno
     cmp dword [asp_use], 0
@@ -2495,6 +2531,139 @@ search_best_move:
 
     movzx rax, word [rsp + r8*2]
     xor edx, edx
+
+    ; root ordering key:
+    ; - promo bonus
+    ; - capture MVV-LVA (+capture history)
+    ; - quiet history
+    mov r9d, eax
+    shr r9d, 12
+    and r9d, 0xF
+
+    ; promo bonus
+    cmp r9d, FLAG_PROMO_Q
+    jb .root_not_promo
+    cmp r9d, FLAG_PROMO_N
+    ja .root_not_promo
+    add edx, 80000
+.root_not_promo:
+
+    ; en-passant je capture aj ked board[to] je prazdny
+    cmp r9d, FLAG_ENPASSANT
+    je .root_cap_ep
+
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    cmp byte [rsi + rdi], EMPTY
+    jne .root_cap_normal
+
+    ; cieleny tie-break: nepreferuj manualny krok kralom z e1/e8,
+    ; ked su root skore remizovane.
+    movzx r9d, ax
+    and r9d, 0x3F                 ; from
+    cmp r9d, 4                    ; e1
+    je .root_king_home_check
+    cmp r9d, 60                   ; e8
+    jne .root_rook_home_check
+.root_king_home_check:
+    movzx edi, byte [rsi + r9]
+    and edi, PIECE_MASK
+    cmp edi, KING
+    jne .root_rook_home_check
+    sub edx, 25000
+
+    ; sekundarny tie-break: v otvarani nepreferuj manualny tah domacou vezou
+    ; z a1/h1/a8/h8, ak nejde o nutenu takticku volbu.
+.root_rook_home_check:
+    movzx r9d, ax
+    and r9d, 0x3F                 ; from
+    cmp r9d, 0                    ; a1
+    je .root_rook_home_sq
+    cmp r9d, 7                    ; h1
+    je .root_rook_home_sq
+    cmp r9d, 56                   ; a8
+    je .root_rook_home_sq
+    cmp r9d, 63                   ; h8
+    jne .root_quiet_hist
+.root_rook_home_sq:
+    movzx edi, byte [rsi + r9]
+    and edi, PIECE_MASK
+    cmp edi, ROOK
+    jne .root_quiet_hist
+    movzx edi, word [fullmove]
+    cmp edi, 12
+    ja .root_quiet_hist
+    sub edx, 12000
+
+    ; quiet history[side][from][to]
+.root_quiet_hist:
+    movzx edi, byte [side]
+    shl edi, 12
+    mov r9d, eax
+    and r9d, 0x3F
+    shl r9d, 6
+    add edi, r9d
+    mov r9d, eax
+    shr r9d, 6
+    and r9d, 0x3F
+    add edi, r9d
+    lea r9, [history]
+    add edx, dword [r9 + rdi*4]
+    jmp .root_score_done
+
+.root_cap_ep:
+    ; EP: victim pawn, attacker pawn
+    add edx, 200900
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    imul edi, edi, 6
+    lea r9, [cap_history]
+    add edx, dword [r9 + rdi*4]
+    jmp .root_score_done
+
+.root_cap_normal:
+    ; capture MVV-LVA + live cap_history
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    movzx edi, byte [rsi + rdi]      ; victim
+    and edi, PIECE_MASK
+    lea r9, [q_capture_value]
+    mov edi, dword [r9 + rdi*4]
+    imul edi, edi, 10
+    add edx, 200000
+    add edx, edi
+
+    movzx edi, ax
+    and edi, 0x3F
+    movzx edi, byte [rsi + rdi]      ; attacker
+    and edi, PIECE_MASK
+    sub edx, dword [r9 + rdi*4]
+
+    ; cap_history index = (attacker-1)*384 + to*6 + (victim-1)
+    movzx edi, ax
+    and edi, 0x3F
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    dec edi
+    imul edi, edi, 384
+    mov r9d, edi
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    imul edi, edi, 6
+    add r9d, edi
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    movzx edi, byte [rsi + rdi]
+    and edi, PIECE_MASK
+    dec edi
+    add r9d, edi
+    lea rdi, [cap_history]
+    add edx, dword [rdi + r9*4]
 
 .root_score_done:
     ; best move z predchadzajucej ID iteracie ma prioritu
@@ -2573,8 +2742,159 @@ search_best_move:
     cmp byte [uci_stop_flag], 0
     jne .loop_done
 
+    ; diagnostika: udrzuj top 5 root tahov podla skore zostupne
+    movzx r8d, word [rsp + rcx*2]
+    push rax
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbx
+    push r8
+
+    mov edx, dword [root_trace_count]
+    cmp edx, 5
+    jb .trace_insert
+
+    mov esi, dword [root_trace_scores + 4*4]
+    cmp eax, esi
+    jle .trace_done
+    mov edx, 4
+    jmp .trace_store
+
+.trace_insert:
+    inc dword [root_trace_count]
+
+.trace_store:
+    mov dword [root_trace_scores + rdx*4], eax
+    mov bx, word [rsp]
+    mov word [root_trace_moves + rdx*2], bx
+
+.trace_bubble:
+    test edx, edx
+    jz .trace_done
+    mov esi, dword [root_trace_scores + rdx*4]
+    mov edi, dword [root_trace_scores + rdx*4 - 4]
+    cmp esi, edi
+    jle .trace_done
+
+    mov dword [root_trace_scores + rdx*4 - 4], esi
+    mov dword [root_trace_scores + rdx*4], edi
+
+    mov bx, word [root_trace_moves + rdx*2]
+    mov di, word [root_trace_moves + rdx*2 - 2]
+    mov word [root_trace_moves + rdx*2 - 2], bx
+    mov word [root_trace_moves + rdx*2], di
+
+    dec edx
+    jmp .trace_bubble
+
+.trace_done:
+    pop r8
+    pop rbx
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rax
+
     cmp eax, r13d
-    jle .next
+    jl .next
+    jg .take_new
+
+    ; tie-break pri rovnakom score:
+    ; ak aktualny best je skory manualny tah domacim kralom/vezou
+    ; a novy tah nie je, preferuj novy tah.
+    xor edx, edx                    ; edx = curr_bad_opening_move
+    movzx r8d, word [rsp + rcx*2]
+    mov r9d, r8d
+    shr r9d, 12
+    cmp r9d, FLAG_CASTLE
+    je .tb_curr_done
+    mov r9d, r8d
+    and r9d, 0x3F
+    cmp r9d, 4
+    je .tb_curr_sq_ok
+    cmp r9d, 60
+    jne .tb_curr_rook
+.tb_curr_sq_ok:
+    lea r11, [board]
+    movzx r10d, byte [r11 + r9]
+    and r10d, PIECE_MASK
+    cmp r10d, KING
+    jne .tb_curr_rook
+    mov edx, 1
+.tb_curr_rook:
+    mov r9d, r8d
+    and r9d, 0x3F
+    cmp r9d, 0
+    je .tb_curr_rook_sq
+    cmp r9d, 7
+    je .tb_curr_rook_sq
+    cmp r9d, 56
+    je .tb_curr_rook_sq
+    cmp r9d, 63
+    jne .tb_curr_done
+.tb_curr_rook_sq:
+    lea r11, [board]
+    movzx r10d, byte [r11 + r9]
+    and r10d, PIECE_MASK
+    cmp r10d, ROOK
+    jne .tb_curr_done
+    movzx r10d, word [fullmove]
+    cmp r10d, 12
+    ja .tb_curr_done
+    mov edx, 1
+.tb_curr_done:
+
+    xor esi, esi                    ; esi = best_bad_opening_move
+    movzx r8d, r14w
+    mov r9d, r8d
+    shr r9d, 12
+    cmp r9d, FLAG_CASTLE
+    je .tb_best_done
+    mov r9d, r8d
+    and r9d, 0x3F
+    cmp r9d, 4
+    je .tb_best_sq_ok
+    cmp r9d, 60
+    jne .tb_best_rook
+.tb_best_sq_ok:
+    lea r11, [board]
+    movzx r10d, byte [r11 + r9]
+    and r10d, PIECE_MASK
+    cmp r10d, KING
+    jne .tb_best_rook
+    mov esi, 1
+.tb_best_rook:
+    mov r9d, r8d
+    and r9d, 0x3F
+    cmp r9d, 0
+    je .tb_best_rook_sq
+    cmp r9d, 7
+    je .tb_best_rook_sq
+    cmp r9d, 56
+    je .tb_best_rook_sq
+    cmp r9d, 63
+    jne .tb_best_done
+.tb_best_rook_sq:
+    lea r11, [board]
+    movzx r10d, byte [r11 + r9]
+    and r10d, PIECE_MASK
+    cmp r10d, ROOK
+    jne .tb_best_done
+    movzx r10d, word [fullmove]
+    cmp r10d, 12
+    ja .tb_best_done
+    mov esi, 1
+.tb_best_done:
+
+    cmp esi, 1
+    jne .next                       ; best nie je home-king -> ponechaj best
+    cmp edx, 0
+    jne .next                       ; current je tiez home-king -> bez zmeny
+
+.take_new:
     mov r13d, eax
     mov dword [root_alpha], eax   ; alpha = best
     movzx r14d, word [rsp + rcx*2]
