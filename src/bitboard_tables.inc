@@ -2,6 +2,9 @@
 ; Do not edit manually.
 
 section .rodata
+global bb_knight_attacks, bb_king_attacks
+global bb_ray_n, bb_ray_s, bb_ray_e, bb_ray_w
+global bb_ray_ne, bb_ray_nw, bb_ray_se, bb_ray_sw
 bb_knight_attacks:
     dq 0x0000000000020400
     dq 0x0000000000050800
