@@ -1732,6 +1732,59 @@ negamax:
     mov r12d, 1
 .quiet_done:
 
+    ; --- SEE PRUNING BRANI v hlavnom searchi ---
+    ; Pri !in_check preskoc zjavne prehravajuce brania (negativne SEE),
+    ; aby sa nefixovali samovrazedne obete do PV.
+    cmp dword [rbp - 44], 0
+    jne .no_cap_see_prune
+    cmp r12d, 1                 ; quiet tahy riesi nizsie quiet SEE prune
+    je .no_cap_see_prune
+    mov rdx, [rbp - 8]
+    cmp rdx, 12
+    jg .no_cap_see_prune
+
+    ; rozlis promo non-capture vs capture/EP
+    mov r9d, eax
+    shr r9d, 12
+    and r9d, 0xF
+    cmp r9d, FLAG_ENPASSANT
+    je .cap_see_is_capture
+    cmp r9d, FLAG_PROMO_Q
+    jb .cap_see_check_to
+    cmp r9d, FLAG_PROMO_N
+    ja .cap_see_check_to
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    lea rsi, [board]
+    cmp byte [rsi + rdi], EMPTY
+    je .no_cap_see_prune        ; promo bez brania
+    jmp .cap_see_is_capture
+
+.cap_see_check_to:
+    movzx edi, ax
+    shr edi, 6
+    and edi, 0x3F
+    lea rsi, [board]
+    cmp byte [rsi + rdi], EMPTY
+    je .no_cap_see_prune
+
+.cap_see_is_capture:
+    imul edx, edx, -120         ; prah = -120 * depth
+    push rcx
+    push rdx
+    call see
+    mov esi, eax
+    pop rdx
+    pop rcx
+    movzx rax, word [rbp - 584 + rcx*2]   ; obnov tah pre make_move
+    cmp esi, edx
+    jge .no_cap_see_prune
+    inc rcx
+    jmp .move_loop
+
+.no_cap_see_prune:
+
     ; --- LMP: neskore tiche tahy pri nizkej hlbke preskoc ---
     ; !in_check && quiet && depth <= 2 && index >= 3 + depth^2
 %if ENABLE_LMP = 0
@@ -2442,33 +2495,6 @@ search_best_move:
 
     movzx rax, word [rsp + r8*2]
     xor edx, edx
-
-    mov r9, rax
-    shr r9, 12
-    and r9, 0xF
-    cmp r9, FLAG_ENPASSANT
-    jne .root_check_capture
-    mov edx, 150
-    jmp .root_check_promo
-
-.root_check_capture:
-    mov r9, rax
-    shr r9, 6
-    and r9, 0x3F
-    movzx edi, byte [rsi + r9]
-    test edi, edi
-    jz .root_check_promo
-    mov edx, 100
-
-.root_check_promo:
-    mov r9, rax
-    shr r9, 12
-    and r9, 0xF
-    cmp r9, FLAG_PROMO_Q
-    jb .root_score_done
-    cmp r9, FLAG_PROMO_N
-    ja .root_score_done
-    add edx, 80
 
 .root_score_done:
     ; best move z predchadzajucej ID iteracie ma prioritu
