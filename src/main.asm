@@ -263,7 +263,7 @@ extern msg_new_game, msg_new_game_len
 extern msg_view_white, msg_view_white_len
 extern write_cstr
 extern uci_id_name, uci_id_author, uci_ok
-extern uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead
+extern uci_opt_hash, uci_opt_ownbook, uci_opt_ponder, uci_opt_syzygy, uci_opt_syzygy_depth, uci_opt_overhead, uci_opt_evalmode, uci_opt_threads
 extern msg_view_black, msg_view_black_len
 extern move_buf, move_buf_len, move_count, side, board_flip, perft_depth, halfmove, engine_side, uci_requested
 extern gfx_active_backend
@@ -1809,6 +1809,10 @@ _start:
     lea rdi, [uci_opt_syzygy_depth]
     call write_cstr
     lea rdi, [uci_opt_overhead]
+    call write_cstr
+    lea rdi, [uci_opt_evalmode]
+    call write_cstr
+    lea rdi, [uci_opt_threads]
     call write_cstr
     lea rdi, [uci_ok]
     call write_cstr
