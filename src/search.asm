@@ -492,8 +492,12 @@ unmake_move:
     movzx r12d, byte [r12 + 1]  ; to (prepise base)
 
     ; E10/F2: hash delta — XOR out post-move stavove kluce
+    ; POZOR: hash_delta_state clobruje rax (ep vetva necha v eax 255 alebo
+    ; ep stlpec) — ax drzi ulozeny fullmove pre restore nizsie, chranit!
     push r8
+    push rax
     call hash_delta_state
+    pop rax
     pop r8
 
     ; uloz stav spat do pamate
@@ -1575,7 +1579,7 @@ negamax:
 
     mov r9, rax
     shr r9, 12
-    and r9, 0xF                  ; flags
+    and r9d, 0xF                  ; flags
 
     ; promocia?
     cmp r9, FLAG_PROMO_Q
@@ -3558,4 +3562,3 @@ book_pick_move:
     pop r12
     pop rbx
     ret
-
