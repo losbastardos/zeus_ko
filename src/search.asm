@@ -3562,3 +3562,4 @@ book_pick_move:
     pop r12
     pop rbx
     ret
+
