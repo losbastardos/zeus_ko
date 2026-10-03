@@ -183,6 +183,7 @@ section .text
 global nnue2_load, nnue2_eval
 global nnue2_feature_idx, nnue2_refresh
 global nnue2_move_delta, nnue2_move_delta_inv
+global nnue2_fwd
 extern board, side, position_hash, moved_piece, captured_piece, promo_pieces
 
 ; ============================================================

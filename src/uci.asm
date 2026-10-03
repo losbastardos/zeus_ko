@@ -141,6 +141,56 @@ uci_info_src_book:  db "info string move_source=book", 10
 uci_info_src_book_len equ $ - uci_info_src_book
 uci_info_src_search: db "info string move_source=search", 10
 uci_info_src_search_len equ $ - uci_info_src_search
+uci_info_root_top:  db "info string root_top ", 0
+uci_info_root_sep:  db "/", 0
+uci_info_root_sp:   db " ", 0
+uci_info_allprune:  db "info string all_prune=", 0
+uci_info_eval_white: db "info string static_eval_white=", 0
+uci_info_eval_stm:   db " static_eval_stm=", 0
+uci_info_hashtest_ok: db "info string hashtest mismatches=0 plies=", 0
+uci_info_hashtest_bad: db "info string hashtest mismatch phase=", 0
+uci_info_hashtest_ply: db " ply=", 0
+uci_info_hashtest_flag: db " flag=", 0
+uci_info_hashtest_move: db " move=", 0
+uci_info_hashtest_h_expected: db " h_expected=", 0
+uci_info_hashtest_h_actual: db " h_actual=", 0
+uci_info_hashtest_phase_make: db "make", 0
+uci_info_hashtest_phase_unmake_delta: db "unmake_delta", 0
+uci_info_hashtest_phase_unmake_restore: db "unmake_restore", 0
+uci_info_nnuewalk_ok: db "info string nnuewalk mismatches=0 plies=", 0
+uci_info_nnuewalk_bad: db "info string nnuewalk mismatch phase=", 0
+uci_info_nnuewalk_ply: db " ply=", 0
+uci_info_nnuewalk_move: db " move=", 0
+uci_info_nnuewalk_type: db " type=", 0
+uci_info_nnuewalk_persp: db " persp=", 0
+uci_info_nnuewalk_eval_inc: db " eval_inc=", 0
+uci_info_nnuewalk_eval_ref: db " eval_ref=", 0
+uci_info_nnuewalk_fen: db " fen=", 0
+uci_info_nnuewalk_no_nnue: db "info string nnuewalk unavailable nnue2_ready=0", 0
+uci_info_nnuewalk_phase_make: db "make", 0
+uci_info_nnuewalk_phase_unmake: db "unmake", 0
+uci_info_nnuewalk_type_quiet: db "quiet", 0
+uci_info_nnuewalk_type_capture: db "capture", 0
+uci_info_nnuewalk_type_castle: db "castle", 0
+uci_info_nnuewalk_type_ep: db "ep", 0
+uci_info_nnuewalk_type_promo: db "promo", 0
+uci_info_nnuewalk_persp_stm: db "stm", 0
+uci_info_nnuewalk_persp_opp: db "opp", 0
+uci_info_rootdiag_prefix: db "info string root_diag move=", 0
+uci_info_rootdiag_score:  db " score=", 0
+uci_info_rootdiag_alpha:  db " alpha=", 0
+uci_info_rootdiag_beta:   db " beta=", 0
+uci_info_rootdiag_flag:   db " flag=", 0
+uci_info_rootdiag_nodes:  db " nodes=", 0
+uci_info_rootdiag_pv:     db " pv=", 0
+uci_info_rootdiag_flag_ex: db "exact", 0
+uci_info_rootdiag_flag_fl: db "fail-low", 0
+uci_info_rootdiag_flag_fh: db "fail-high", 0
+uci_info_evalstate_prefix: db "info string evalstate stm=", 0
+uci_info_evalstate_valid:  db " acc_valid=", 0
+uci_info_evalstate_match:  db " acc_match=", 0
+uci_info_evalstate_inc:    db " nnue_inc=", 0
+uci_info_evalstate_ref:    db " nnue_ref=", 0
 uci_str_0000:      db "0000"
 uci_log_bad_bm:    db "!! WARNING: bestmove nie je legalny tah - fallback na prvy legalny", 10
 uci_log_bad_bm_len equ $ - uci_log_bad_bm
@@ -163,6 +213,28 @@ input_pollfd:   resd 2    ; pollfd: dd fd, dw events, dw revents
 uci_iter_start: resq 1    ; mode 2: start aktuálnej ID iterácie (ms)
 uci_iter_dur:   resq 1    ; mode 2: trvanie poslednej dokončenej iterácie (ms)
 uci_move_source: resb 1   ; 0=search, 1=book
+uci_last_iter_move: resd 1 ; posledny tah vrateny search_best_move v ID smycke
+uci_eval_white_tmp: resd 1
+uci_eval_stm_tmp:   resd 1
+uci_hashtest_plies:      resd 1
+uci_hashtest_phase:      resd 1
+uci_hashtest_flag:       resd 1
+uci_hashtest_move:       resw 1
+uci_hashtest_h_expected: resq 1
+uci_hashtest_h_actual:   resq 1
+uci_nnuewalk_plies:        resd 1
+uci_nnuewalk_phase:        resd 1
+uci_nnuewalk_persp:        resd 1
+uci_nnuewalk_move:         resw 1
+uci_nnuewalk_type:         resd 1
+uci_nnuewalk_total:        resd 1
+uci_nnuewalk_eval_inc_stm: resd 1
+uci_nnuewalk_eval_inc_opp: resd 1
+uci_nnuewalk_eval_ref_stm: resd 1
+uci_nnuewalk_eval_ref_opp: resd 1
+uci_nnuewalk_moves:        resw 1024
+uci_nnuewalk_types:        resb 1024
+uci_rootdiag_enabled:      resb 1
 
 INPUT_PEND_SIZE equ 512
 
@@ -177,10 +249,17 @@ extern search_best_move, book_lookup, print_move, square_to_str, print_number
 extern tt_init
 extern parse_fen_string, parse_int, config_get
 extern board, side, move_buf, move_buf_len, move_list, move_count, search_depth
+extern castle, enpassant, halfmove, fullmove
 extern position_hash, square_str_buf
+extern evaluate
 extern eval_mode
 extern nnue_load
 extern nnue2_load
+extern nnue2_eval, nnue2_refresh
+extern nnue2_fwd
+extern nnue2_ready
+extern nnue_acc_valid
+extern nnue_acc_hash
 extern key_nnue_file
 extern default_nnue_file
 extern uci_stop_flag, uci_ponder, uci_own_book, uci_hash_size, uci_move_overhead, uci_syzygy_probe_depth, uci_threads
@@ -188,7 +267,14 @@ extern smp_init, smp_clear_stop, smp_spawn_helpers, smp_stop_and_reap, smp_signa
 extern smp_shared
 extern search_limits, nodes_searched, search_last_score
 extern asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
+extern root_trace_count, root_trace_moves, root_trace_scores
+extern root_diag_count, root_diag_moves, root_diag_scores, root_diag_alpha, root_diag_beta
+extern root_diag_flag, root_diag_nodes, root_diag_pv0
+extern trace_white_enable
+extern prof_allprune
 extern make_move, unmake_move, tt_probe
+extern captured_piece
+extern filter_legal_moves
 extern pv_moves, pv_moves_len
 extern msg_newline
 extern tb_init, tb_path, tb_path_len, tb_probe_wdl, tb_probe_dtz, tb_piece_count, tb_map_size, tb_file_path, tb_tb_size
@@ -1414,6 +1500,7 @@ uci_sanitize_best:
 ; uci_print_signed_number - vypise signed cislo z rax
 ; ============================================================
 global uci_print_signed_number
+global uci_print_move_token, uci_emit_fen
 uci_print_signed_number:
     test rax, rax
     jns .pos
@@ -1497,6 +1584,329 @@ extract_pv:
     ret
 
 ; ============================================================
+; uci_print_move_token - vypise tah v tvare e2e4/e7e8q bez medzery
+; Vstup: rax (spodnych 16 bitov = tah)
+; ============================================================
+uci_print_move_token:
+    push rbx
+
+    mov bx, ax
+
+    movzx rax, bx
+    and rax, 0x3F
+    call square_to_str
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, square_str_buf
+    mov rdx, 2
+    syscall
+
+    movzx rax, bx
+    shr rax, 6
+    and rax, 0x3F
+    call square_to_str
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, square_str_buf
+    mov rdx, 2
+    syscall
+
+    movzx eax, bx
+    shr eax, 12
+    cmp eax, FLAG_PROMO_Q
+    jb .done
+    cmp eax, FLAG_PROMO_N
+    ja .done
+    lea rcx, [pv_promo_chars]
+    movzx eax, byte [rcx + rax - 1]
+    mov [pv_char_buf], al
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [pv_char_buf]
+    mov rdx, 1
+    syscall
+
+.done:
+    pop rbx
+    ret
+
+; ============================================================
+; uci_write_char - vypise 1 znak na stdout
+; Vstup: al = znak
+; ============================================================
+uci_write_char:
+    mov [pv_char_buf], al
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [pv_char_buf]
+    mov rdx, 1
+    syscall
+    ret
+
+; ============================================================
+; uci_piece_to_fen_char - mapovanie engine piece bajtu na FEN znak
+; Vstup: ecx = piece (typ|farba)
+; Vystup: al = FEN znak
+; ============================================================
+uci_piece_to_fen_char:
+    mov eax, ecx
+    and eax, PIECE_MASK
+    cmp eax, PAWN
+    je .pawn
+    cmp eax, KNIGHT
+    je .knight
+    cmp eax, BISHOP
+    je .bishop
+    cmp eax, ROOK
+    je .rook
+    cmp eax, QUEEN
+    je .queen
+    cmp eax, KING
+    je .king
+    mov al, '?'
+    ret
+.pawn:
+    mov al, 'p'
+    jmp .case
+.knight:
+    mov al, 'n'
+    jmp .case
+.bishop:
+    mov al, 'b'
+    jmp .case
+.rook:
+    mov al, 'r'
+    jmp .case
+.queen:
+    mov al, 'q'
+    jmp .case
+.king:
+    mov al, 'k'
+.case:
+    test ecx, COLOR_MASK
+    jnz .done
+    sub al, 32
+.done:
+    ret
+
+; ============================================================
+; uci_emit_fen - vypise aktualnu poziciu ako FEN (bez newline)
+; ============================================================
+uci_emit_fen:
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    lea r15, [board]
+    mov r12d, 7
+.rank_loop:
+    mov r14d, 0
+    xor r13d, r13d
+.file_loop:
+    cmp r13d, 8
+    jae .rank_end
+    mov eax, r12d
+    shl eax, 3
+    add eax, r13d
+    movzx ecx, byte [r15 + rax]
+    test ecx, ecx
+    jnz .piece
+    inc r14d
+    inc r13d
+    jmp .file_loop
+
+.piece:
+    test r14d, r14d
+    jz .emit_piece
+    mov eax, r14d
+    add al, '0'
+    call uci_write_char
+    xor r14d, r14d
+.emit_piece:
+    call uci_piece_to_fen_char
+    call uci_write_char
+    inc r13d
+    jmp .file_loop
+
+.rank_end:
+    test r14d, r14d
+    jz .rank_sep
+    mov eax, r14d
+    add al, '0'
+    call uci_write_char
+.rank_sep:
+    test r12d, r12d
+    jz .after_board
+    mov al, '/'
+    call uci_write_char
+    dec r12d
+    jmp .rank_loop
+
+.after_board:
+    mov al, ' '
+    call uci_write_char
+    movzx eax, byte [side]
+    cmp eax, WHITE
+    jne .side_b
+    mov al, 'w'
+    jmp .side_emit
+.side_b:
+    mov al, 'b'
+.side_emit:
+    call uci_write_char
+
+    mov al, ' '
+    call uci_write_char
+    movzx ebx, byte [castle]
+    test ebx, ebx
+    jnz .castle_emit
+    mov al, '-'
+    call uci_write_char
+    jmp .ep_part
+.castle_emit:
+    test bl, CASTLE_WK
+    jz .castle_wq
+    mov al, 'K'
+    call uci_write_char
+.castle_wq:
+    test bl, CASTLE_WQ
+    jz .castle_bk
+    mov al, 'Q'
+    call uci_write_char
+.castle_bk:
+    test bl, CASTLE_BK
+    jz .castle_bq
+    mov al, 'k'
+    call uci_write_char
+.castle_bq:
+    test bl, CASTLE_BQ
+    jz .ep_part
+    mov al, 'q'
+    call uci_write_char
+
+.ep_part:
+    mov al, ' '
+    call uci_write_char
+    movzx rax, byte [enpassant]
+    cmp rax, 255
+    jne .ep_sq
+    mov al, '-'
+    call uci_write_char
+    jmp .hm_part
+.ep_sq:
+    call square_to_str
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, square_str_buf
+    mov rdx, 2
+    syscall
+
+.hm_part:
+    mov al, ' '
+    call uci_write_char
+    movzx rax, byte [halfmove]
+    call print_number
+    mov al, ' '
+    call uci_write_char
+    movzx rax, word [fullmove]
+    call print_number
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; ============================================================
+; uci_nnuewalk_classify_type - urci typ tahu pre log
+; Vstup: ax = tah, captured_piece po make
+; Vystup: eax = 0 quiet, 1 capture, 2 castle, 3 ep, 4 promo
+; ============================================================
+uci_nnuewalk_classify_type:
+    movzx eax, ax
+    shr eax, 12
+    cmp eax, FLAG_CASTLE
+    je .castle
+    cmp eax, FLAG_ENPASSANT
+    je .ep
+    cmp eax, FLAG_PROMO_Q
+    jb .cap
+    cmp eax, FLAG_PROMO_N
+    jbe .promo
+.cap:
+    movzx eax, byte [captured_piece]
+    test eax, eax
+    jz .quiet
+    mov eax, 1
+    ret
+.quiet:
+    xor eax, eax
+    ret
+.castle:
+    mov eax, 2
+    ret
+.ep:
+    mov eax, 3
+    ret
+.promo:
+    mov eax, 4
+    ret
+
+; ============================================================
+; uci_nnuewalk_cmp_evals - porovnaj inkrementalny a refresh eval
+; pre STM aj OPP perspektivu v aktualnej pozicii.
+; Vystup: eax = 0 OK, 1 mismatch STM, 2 mismatch OPP
+; ============================================================
+uci_nnuewalk_cmp_evals:
+    push rbx
+    mov bl, [side]
+
+    call nnue2_fwd
+    mov [uci_nnuewalk_eval_inc_stm], eax
+
+    movzx eax, bl
+    xor eax, 1
+    mov [side], al
+    call nnue2_fwd
+    mov [uci_nnuewalk_eval_inc_opp], eax
+
+    mov [side], bl
+    call nnue2_refresh
+    call nnue2_fwd
+    mov [uci_nnuewalk_eval_ref_stm], eax
+
+    movzx eax, bl
+    xor eax, 1
+    mov [side], al
+    call nnue2_fwd
+    mov [uci_nnuewalk_eval_ref_opp], eax
+
+    mov [side], bl
+
+    mov eax, [uci_nnuewalk_eval_inc_stm]
+    cmp eax, [uci_nnuewalk_eval_ref_stm]
+    jne .bad_stm
+    mov eax, [uci_nnuewalk_eval_inc_opp]
+    cmp eax, [uci_nnuewalk_eval_ref_opp]
+    jne .bad_opp
+    xor eax, eax
+    pop rbx
+    ret
+
+.bad_stm:
+    mov eax, 1
+    pop rbx
+    ret
+
+.bad_opp:
+    mov eax, 2
+    pop rbx
+    ret
+
+; ============================================================
 ; uci_emit_info - vypise jeden info riadok
 ; Vstup: rdi = depth, rsi = time_ms, rdx = best_move
 ; ============================================================
@@ -1544,6 +1954,123 @@ uci_emit_info:
     mov rsi, msg_newline
     mov rdx, 1
     syscall
+
+    ; diagnostika root kandidatov (top 5 podla cp skore)
+    mov r10d, [root_trace_count]
+    test r10d, r10d
+    jz .emit_allprune
+
+    lea rdi, [uci_info_root_top]
+    call write_cstr
+    xor ebx, ebx
+.root_top_loop:
+    cmp ebx, r10d
+    jge .root_top_nl
+    movzx rax, word [root_trace_moves + rbx*2]
+    call uci_print_move_token
+    lea rdi, [uci_info_root_sep]
+    call write_cstr
+    movsxd rax, dword [root_trace_scores + rbx*4]
+    call uci_print_signed_number
+    lea rdi, [uci_info_root_sp]
+    call write_cstr
+    inc rbx
+    jmp .root_top_loop
+
+.root_top_nl:
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+
+.emit_allprune:
+    lea rdi, [uci_info_allprune]
+    call write_cstr
+    mov rax, [prof_allprune]
+    call print_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+
+    cmp byte [uci_rootdiag_enabled], 0
+    je .done_emit
+
+    xor ebx, ebx
+.rootdiag_loop:
+    mov r10d, [root_diag_count]
+    cmp ebx, r10d
+    jge .done_emit
+
+    lea rdi, [uci_info_rootdiag_prefix]
+    call write_cstr
+    movzx rax, word [root_diag_moves + rbx*2]
+    call uci_print_move_token
+
+    lea rdi, [uci_info_rootdiag_score]
+    call write_cstr
+    movsxd rax, dword [root_diag_scores + rbx*4]
+    call uci_print_signed_number
+
+    lea rdi, [uci_info_rootdiag_alpha]
+    call write_cstr
+    movsxd rax, dword [root_diag_alpha + rbx*4]
+    call uci_print_signed_number
+
+    lea rdi, [uci_info_rootdiag_beta]
+    call write_cstr
+    movsxd rax, dword [root_diag_beta + rbx*4]
+    call uci_print_signed_number
+
+    lea rdi, [uci_info_rootdiag_flag]
+    call write_cstr
+    movzx eax, byte [root_diag_flag + rbx]
+    cmp eax, 1
+    je .rootdiag_fl
+    cmp eax, 2
+    je .rootdiag_fh
+    lea rdi, [uci_info_rootdiag_flag_ex]
+    call write_cstr
+    jmp .rootdiag_flag_done
+.rootdiag_fl:
+    lea rdi, [uci_info_rootdiag_flag_fl]
+    call write_cstr
+    jmp .rootdiag_flag_done
+.rootdiag_fh:
+    lea rdi, [uci_info_rootdiag_flag_fh]
+    call write_cstr
+.rootdiag_flag_done:
+
+    lea rdi, [uci_info_rootdiag_nodes]
+    call write_cstr
+    mov rax, [root_diag_nodes + rbx*8]
+    call print_number
+
+    lea rdi, [uci_info_rootdiag_pv]
+    call write_cstr
+    movzx rax, word [root_diag_pv0 + rbx*2]
+    test rax, rax
+    jz .rootdiag_no_pv
+    call uci_print_move_token
+    jmp .rootdiag_line_done
+.rootdiag_no_pv:
+    lea rdi, [uci_str_0000]
+    mov rdx, 4
+    call write_str
+
+.rootdiag_line_done:
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+
+    inc ebx
+    jmp .rootdiag_loop
+
+.done_emit:
 
     pop r13
     pop r12
@@ -1847,6 +2374,7 @@ uci_go:
     xor r14d, r14d            ; best_depth
     mov r15, 1                ; current depth
     mov qword [uci_iter_dur], 0
+    mov dword [uci_last_iter_move], 0
     cmp byte [uci_stop_flag], 0
     jne .id_loop              ; stop hned: helperov nespustame
     mov eax, [uci_threads]
@@ -1903,6 +2431,7 @@ uci_go:
 .asp_ready:
     mov rdi, r15
     call search_best_move
+    mov [uci_last_iter_move], eax
 
     cmp byte [uci_stop_flag], 0
     jne .id_done
@@ -1971,6 +2500,24 @@ uci_go:
     call smp_stop_and_reap    ; bezpecne aj bez helperov (child_count=0 -> hned return)
     test r13, r13
     jnz .id_have_best
+
+    ; ak stop prisiel pocas iteracie pred .asp_ok, pouzi posledny tah,
+    ; ktory search vratil, aby sme nespustali novy fallback search
+    ; s aktivnym uci_stop_flag (ten casto vracia nahodny prvy tah).
+    mov eax, [uci_last_iter_move]
+    test eax, eax
+    jz .id_fallback_depth1
+    mov r13d, eax
+    mov r14, r15
+    call uci_now_ms
+    sub rax, [search_limits + 48]
+    mov rdi, r14
+    mov rsi, rax
+    mov rdx, r13
+    call uci_emit_info
+    jmp .id_have_best
+
+.id_fallback_depth1:
     mov rdi, 1
     call search_best_move
     mov r13, rax
@@ -2405,6 +2952,46 @@ uci_loop:
     test rax, rax
     jnz .list
 
+    ; 'hashtest' (non-standard helper: make/unmake hash konzistencia)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_hashtest]
+    call uci_str_eq
+    test rax, rax
+    jnz .hashtest
+
+    ; 'eval' (non-standard helper: cisty static eval bez searchu)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_eval]
+    call uci_str_eq
+    test rax, rax
+    jnz .eval
+
+    ; 'evalstate' (non-standard helper: NNUE acc stav + inc/ref eval)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_evalstate]
+    call uci_str_eq
+    test rax, rax
+    jnz .evalstate
+
+    ; 'rootdiag' (non-standard helper: zapne detailny root log)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_rootdiag]
+    call uci_str_eq
+    test rax, rax
+    jnz .rootdiag
+
+    ; 'nnuewalk' (non-standard helper: NNUE acc inkremental vs refresh)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_nnuewalk]
+    call uci_str_eq
+    test rax, rax
+    jnz .nnuewalk
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
@@ -2419,6 +3006,426 @@ uci_loop:
 .list:
     call generate_all_moves
     call print_move_list
+    jmp .loop
+
+.eval:
+    ; evaluate vracia skore z pohladu bieleho; dopocteme aj STM perspektivu
+    call evaluate
+    mov dword [uci_eval_white_tmp], eax
+    mov dword [uci_eval_stm_tmp], eax
+    movzx eax, byte [side]
+    cmp eax, WHITE
+    je .eval_emit
+    mov eax, [uci_eval_stm_tmp]
+    neg eax
+    mov [uci_eval_stm_tmp], eax
+
+.eval_emit:
+    lea rdi, [uci_info_eval_white]
+    call write_cstr
+    movsxd rax, dword [uci_eval_white_tmp]
+    call uci_print_signed_number
+    lea rdi, [uci_info_eval_stm]
+    call write_cstr
+    movsxd rax, dword [uci_eval_stm_tmp]
+    call uci_print_signed_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.evalstate:
+    lea rdi, [uci_info_evalstate_prefix]
+    call write_cstr
+    movzx rax, byte [side]
+    call print_number
+
+    lea rdi, [uci_info_evalstate_valid]
+    call write_cstr
+    movzx rax, byte [nnue_acc_valid]
+    call print_number
+
+    lea rdi, [uci_info_evalstate_match]
+    call write_cstr
+    xor eax, eax
+    cmp byte [nnue_acc_valid], 1
+    jne .evalstate_match_emit
+    mov rax, [nnue_acc_hash]
+    cmp rax, [position_hash]
+    jne .evalstate_match_emit
+    mov eax, 1
+.evalstate_match_emit:
+    call print_number
+
+    lea rdi, [uci_info_evalstate_inc]
+    call write_cstr
+    cmp byte [nnue2_ready], 1
+    jne .evalstate_inc_zero
+    call nnue2_fwd
+    movsxd rax, eax
+    call uci_print_signed_number
+    jmp .evalstate_ref
+.evalstate_inc_zero:
+    xor eax, eax
+    call uci_print_signed_number
+
+.evalstate_ref:
+    lea rdi, [uci_info_evalstate_ref]
+    call write_cstr
+    cmp byte [nnue2_ready], 1
+    jne .evalstate_ref_zero
+    call nnue2_refresh
+    call nnue2_fwd
+    movsxd rax, eax
+    call uci_print_signed_number
+    jmp .evalstate_done
+.evalstate_ref_zero:
+    xor eax, eax
+    call uci_print_signed_number
+
+.evalstate_done:
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.rootdiag:
+    mov byte [uci_rootdiag_enabled], 1
+    jmp .loop
+
+.hashtest:
+    ; deterministicky hash test: 256 legalnych ply,
+    ; po make/unmake porovnaj inkrementalny hash vs compute_hash.
+    call init_board
+    call init_hash_history
+    call record_hash
+    mov dword [uci_hashtest_plies], 0
+    mov dword [uci_hashtest_phase], 0
+
+.hashtest_loop:
+    call compute_hash
+    mov r15, [position_hash]                ; h0 pred tahom
+
+    mov byte [nnue_acc_valid], 0
+    call generate_all_moves
+    call filter_legal_moves
+    movzx ecx, word [move_count]
+    test ecx, ecx
+    jz .hashtest_ok
+
+    mov rax, [position_hash]
+    xor edx, edx
+    div ecx                                  ; edx = pseudo-random index tahu
+    lea rsi, [move_list]
+    movzx eax, word [rsi + rdx*2]
+    mov [uci_hashtest_move], ax
+    movzx ebx, ax
+    shr ebx, 12
+    mov [uci_hashtest_flag], ebx
+
+    call make_move
+
+    mov r14, [position_hash]                ; inkremental po make
+    call compute_hash
+    mov r13, [position_hash]                ; plny po make
+    cmp r13, r14
+    jne .hashtest_fail_make
+
+    call unmake_move
+
+    mov r14, [position_hash]                ; inkremental po unmake
+    call compute_hash
+    mov r13, [position_hash]                ; plny po unmake
+    cmp r13, r14
+    jne .hashtest_fail_unmake_delta
+    cmp r13, r15                            ; restore na h0?
+    jne .hashtest_fail_unmake_restore
+
+    inc dword [uci_hashtest_plies]
+    cmp dword [uci_hashtest_plies], 256
+    jl .hashtest_loop
+
+.hashtest_ok:
+    lea rdi, [uci_info_hashtest_ok]
+    call write_cstr
+    mov eax, [uci_hashtest_plies]
+    movsxd rax, eax
+    call print_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.hashtest_fail_make:
+    mov dword [uci_hashtest_phase], 1
+    mov [uci_hashtest_h_expected], r14
+    mov [uci_hashtest_h_actual], r13
+    jmp .hashtest_emit_fail
+
+.hashtest_fail_unmake_delta:
+    mov dword [uci_hashtest_phase], 2
+    mov [uci_hashtest_h_expected], r14
+    mov [uci_hashtest_h_actual], r13
+    jmp .hashtest_emit_fail
+
+.hashtest_fail_unmake_restore:
+    mov dword [uci_hashtest_phase], 3
+    mov [uci_hashtest_h_expected], r15
+    mov [uci_hashtest_h_actual], r13
+
+.hashtest_emit_fail:
+    lea rdi, [uci_info_hashtest_bad]
+    call write_cstr
+    mov eax, [uci_hashtest_phase]
+    cmp eax, 1
+    jne .phase_check2
+    lea rdi, [uci_info_hashtest_phase_make]
+    call write_cstr
+    jmp .phase_done
+.phase_check2:
+    cmp eax, 2
+    jne .phase_restore
+    lea rdi, [uci_info_hashtest_phase_unmake_delta]
+    call write_cstr
+    jmp .phase_done
+.phase_restore:
+    lea rdi, [uci_info_hashtest_phase_unmake_restore]
+    call write_cstr
+.phase_done:
+    lea rdi, [uci_info_hashtest_ply]
+    call write_cstr
+    mov eax, [uci_hashtest_plies]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_info_hashtest_flag]
+    call write_cstr
+    mov eax, [uci_hashtest_flag]
+    movsxd rax, eax
+    call print_number
+    lea rdi, [uci_info_hashtest_move]
+    call write_cstr
+    movzx rax, word [uci_hashtest_move]
+    call uci_print_move_token
+    lea rdi, [uci_info_hashtest_h_expected]
+    call write_cstr
+    mov rax, [uci_hashtest_h_expected]
+    call print_number
+    lea rdi, [uci_info_hashtest_h_actual]
+    call write_cstr
+    mov rax, [uci_hashtest_h_actual]
+    call print_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.nnuewalk:
+    ; random playout + unwind: po kazdom make aj unmake porovnaj
+    ; nnue2_eval (acc delta) vs nnue2_refresh + nnue2_eval.
+    cmp byte [nnue2_ready], 1
+    je .nnuewalk_go
+    lea rdi, [uci_info_nnuewalk_no_nnue]
+    call write_cstr
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.nnuewalk_go:
+    call init_board
+    call init_hash_history
+    call record_hash
+    call nnue2_refresh
+    mov dword [uci_nnuewalk_plies], 0
+    mov dword [uci_nnuewalk_total], 0
+    mov dword [uci_nnuewalk_phase], 0
+    mov dword [uci_nnuewalk_persp], 0
+
+.nnuewalk_fwd_loop:
+    mov eax, [uci_nnuewalk_plies]
+    cmp eax, 60
+    jge .nnuewalk_unwind
+
+    mov byte [nnue_acc_valid], 0
+    call generate_all_moves
+    call filter_legal_moves
+    movzx ecx, word [move_count]
+    test ecx, ecx
+    jz .nnuewalk_unwind
+
+    mov rax, [position_hash]
+    xor edx, edx
+    div ecx
+    lea rsi, [move_list]
+    movzx eax, word [rsi + rdx*2]
+    mov [uci_nnuewalk_move], ax
+
+    mov ecx, [uci_nnuewalk_plies]
+    mov [uci_nnuewalk_moves + rcx*2], ax
+
+    call nnue2_refresh
+    movzx eax, word [uci_nnuewalk_move]
+    call make_move
+
+    mov ax, [uci_nnuewalk_move]
+    call uci_nnuewalk_classify_type
+    mov ecx, [uci_nnuewalk_plies]
+    mov [uci_nnuewalk_types + rcx], al
+    mov [uci_nnuewalk_type], eax
+
+    mov dword [uci_nnuewalk_phase], 1
+    call uci_nnuewalk_cmp_evals
+    test eax, eax
+    jnz .nnuewalk_fail
+
+    inc dword [uci_nnuewalk_plies]
+    inc dword [uci_nnuewalk_total]
+    jmp .nnuewalk_fwd_loop
+
+.nnuewalk_unwind:
+    cmp dword [uci_nnuewalk_plies], 0
+    je .nnuewalk_ok
+
+.nnuewalk_unwind_loop:
+    cmp dword [uci_nnuewalk_plies], 0
+    je .nnuewalk_ok
+
+    dec dword [uci_nnuewalk_plies]
+    mov ecx, [uci_nnuewalk_plies]
+    movzx eax, word [uci_nnuewalk_moves + rcx*2]
+    mov [uci_nnuewalk_move], ax
+    movzx eax, byte [uci_nnuewalk_types + rcx]
+    mov [uci_nnuewalk_type], eax
+
+    call unmake_move
+
+    mov dword [uci_nnuewalk_phase], 2
+    call uci_nnuewalk_cmp_evals
+    test eax, eax
+    jnz .nnuewalk_fail
+
+    jmp .nnuewalk_unwind_loop
+
+.nnuewalk_ok:
+    lea rdi, [uci_info_nnuewalk_ok]
+    call write_cstr
+    mov eax, [uci_nnuewalk_total]
+    movsxd rax, eax
+    call print_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    jmp .loop
+
+.nnuewalk_fail:
+    mov [uci_nnuewalk_persp], eax
+    lea rdi, [uci_info_nnuewalk_bad]
+    call write_cstr
+
+    mov eax, [uci_nnuewalk_phase]
+    cmp eax, 1
+    jne .nnuewalk_emit_phase_unmake
+    lea rdi, [uci_info_nnuewalk_phase_make]
+    call write_cstr
+    jmp .nnuewalk_emit_ply
+.nnuewalk_emit_phase_unmake:
+    lea rdi, [uci_info_nnuewalk_phase_unmake]
+    call write_cstr
+
+.nnuewalk_emit_ply:
+    lea rdi, [uci_info_nnuewalk_ply]
+    call write_cstr
+    mov eax, [uci_nnuewalk_plies]
+    movsxd rax, eax
+    call print_number
+
+    lea rdi, [uci_info_nnuewalk_move]
+    call write_cstr
+    movzx rax, word [uci_nnuewalk_move]
+    call uci_print_move_token
+
+    lea rdi, [uci_info_nnuewalk_type]
+    call write_cstr
+    mov eax, [uci_nnuewalk_type]
+    cmp eax, 1
+    je .nnuewalk_type_capture
+    cmp eax, 2
+    je .nnuewalk_type_castle
+    cmp eax, 3
+    je .nnuewalk_type_ep
+    cmp eax, 4
+    je .nnuewalk_type_promo
+    lea rdi, [uci_info_nnuewalk_type_quiet]
+    call write_cstr
+    jmp .nnuewalk_emit_persp
+.nnuewalk_type_capture:
+    lea rdi, [uci_info_nnuewalk_type_capture]
+    call write_cstr
+    jmp .nnuewalk_emit_persp
+.nnuewalk_type_castle:
+    lea rdi, [uci_info_nnuewalk_type_castle]
+    call write_cstr
+    jmp .nnuewalk_emit_persp
+.nnuewalk_type_ep:
+    lea rdi, [uci_info_nnuewalk_type_ep]
+    call write_cstr
+    jmp .nnuewalk_emit_persp
+.nnuewalk_type_promo:
+    lea rdi, [uci_info_nnuewalk_type_promo]
+    call write_cstr
+
+.nnuewalk_emit_persp:
+    lea rdi, [uci_info_nnuewalk_persp]
+    call write_cstr
+    mov eax, [uci_nnuewalk_persp]
+    cmp eax, 1
+    jne .nnuewalk_persp_opp
+    lea rdi, [uci_info_nnuewalk_persp_stm]
+    call write_cstr
+    movsxd rax, dword [uci_nnuewalk_eval_inc_stm]
+    jmp .nnuewalk_emit_evals
+.nnuewalk_persp_opp:
+    lea rdi, [uci_info_nnuewalk_persp_opp]
+    call write_cstr
+    movsxd rax, dword [uci_nnuewalk_eval_inc_opp]
+
+.nnuewalk_emit_evals:
+    lea rdi, [uci_info_nnuewalk_eval_inc]
+    call write_cstr
+    call uci_print_signed_number
+    lea rdi, [uci_info_nnuewalk_eval_ref]
+    call write_cstr
+    mov eax, [uci_nnuewalk_persp]
+    cmp eax, 1
+    jne .nnuewalk_ref_opp
+    movsxd rax, dword [uci_nnuewalk_eval_ref_stm]
+    jmp .nnuewalk_ref_emit
+.nnuewalk_ref_opp:
+    movsxd rax, dword [uci_nnuewalk_eval_ref_opp]
+.nnuewalk_ref_emit:
+    call uci_print_signed_number
+
+    lea rdi, [uci_info_nnuewalk_fen]
+    call write_cstr
+    call uci_emit_fen
+
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
     jmp .loop
 
 .isready:
@@ -2869,3 +3876,8 @@ uci_loop:
 .str_ecotest: db "ecotest", 0
 .str_bbtest:  db "bbtest", 0
 .str_list:    db "list", 0
+.str_eval:    db "eval", 0
+.str_evalstate: db "evalstate", 0
+.str_hashtest: db "hashtest", 0
+.str_nnuewalk: db "nnuewalk", 0
+.str_rootdiag: db "rootdiag", 0

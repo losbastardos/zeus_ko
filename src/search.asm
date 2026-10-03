@@ -48,6 +48,12 @@ DEFAULT REL
 %ifndef ENABLE_SINGULAR
 %define ENABLE_SINGULAR 1
 %endif
+%ifndef ENABLE_TT
+%define ENABLE_TT 1
+%endif
+%ifndef ENABLE_QDELTA
+%define ENABLE_QDELTA 1
+%endif
 %ifndef ENABLE_CORR_HISTORY
 %define ENABLE_CORR_HISTORY 1
 %endif
@@ -69,6 +75,22 @@ section .data
 
 q_capture_value:
     dd 0, 100, 320, 330, 500, 900, 0
+
+trace_w_init_prefix: db "info string wtrace init best_init=", 0
+trace_w_alpha_init:  db " alpha_init=", 0
+trace_w_stm:         db " stm=", 0
+trace_w_fen:         db " fen=", 0
+trace_w_reply_prefix: db "info string wtrace reply move=", 0
+trace_w_score:       db " score=", 0
+trace_w_flag:        db " flag=", 0
+trace_w_alpha:       db " alpha=", 0
+trace_w_beta:        db " beta=", 0
+trace_w_eval:        db " eval_search=", 0
+trace_w_final_prefix: db "info string wtrace final best=", 0
+trace_w_returned:    db " returned=", 0
+trace_w_flag_exact:  db "exact", 0
+trace_w_flag_fl:     db "fail-low", 0
+trace_w_flag_fh:     db "fail-high", 0
 
 section .bss
 
@@ -98,6 +120,23 @@ root_alpha:     resd 1          ; aktualne alpha v root slucke
 root_trace_count:  resd 1       ; diagnostika: pocet top root kandidatov (max 5)
 root_trace_moves:  resw 5       ; diagnostika: root tahy (zoradene podla skore)
 root_trace_scores: resd 5       ; diagnostika: root skore (zoradene zostupne)
+root_diag_count:   resd 1       ; detailny root log: pocet zaznamov
+root_diag_moves:   resw 256     ; tah
+root_diag_scores:  resd 256     ; vratene score
+root_diag_alpha:   resd 256     ; alpha okno final callu
+root_diag_beta:    resd 256     ; beta okno final callu
+root_diag_flag:    resb 256     ; 0=exact,1=fail-low,2=fail-high
+root_diag_nodes:   resq 256     ; uzly na root tah
+root_diag_pv0:     resw 256     ; prvy child PV tah
+root_diag_a_tmp:   resd 1
+root_diag_b_tmp:   resd 1
+root_diag_nodes_start: resq 1
+trace_white_enable:  resb 1     ; zapina cieleny trace White uzla po d4e5
+trace_white_active:  resb 1     ; interny flag pre aktualny uzol
+trace_root_target:   resb 1     ; 1 ak root aktualne prehladava d4e5 vetvu
+trace_move_alpha:    resd 1
+trace_move_beta:     resd 1
+trace_char:          resb 1
 smp_worker_mode: resd 1         ; 1 = volanie z helper procesu (rovno do single rezimu)
 smp_child_pids:    resq 8
 
@@ -114,6 +153,9 @@ section .text
 global make_move, unmake_move, quiescence, negamax, search_best_move, perft
 global asp_alpha, asp_beta, asp_delta, asp_use, asp_retry
 global root_trace_count, root_trace_moves, root_trace_scores
+global root_diag_count, root_diag_moves, root_diag_scores, root_diag_alpha, root_diag_beta
+global root_diag_flag, root_diag_nodes, root_diag_pv0
+global trace_white_enable
 global smp_worker_mode, smp_child_pids
 global prof_qnodes, prof_evals, prof_movegen, prof_makes, prof_unmakes, prof_allprune
 
@@ -140,6 +182,8 @@ extern search_poll_input
 extern book_lookup_all, book_moves, book_moves_len, book_mode, book_search_depth, book_rating_flag
 extern singular_excl
 extern smp_check_stop, smp_signal_stop
+extern write_cstr, print_number, msg_newline
+extern uci_emit_fen, uci_print_move_token
 
 ; ============================================================
 ; check_time - periodicka kontrola timeoutu pre UCI search
@@ -236,6 +280,37 @@ check_time:
     pop rbx
     ret
 
+; ============================================================
+; trace_print_signed - vypise signed cislo
+; Vstup: rax = hodnota
+; ============================================================
+trace_print_signed:
+    cmp rax, 0
+    jge .tp_num
+    push rax
+    mov byte [trace_char], '-'
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    lea rsi, [trace_char]
+    mov rdx, 1
+    syscall
+    pop rax
+    neg rax
+.tp_num:
+    call print_number
+    ret
+
+; ============================================================
+; trace_nl - newline
+; ============================================================
+trace_nl:
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
+    ret
+
 
 
 ; ============================================================
@@ -256,6 +331,13 @@ make_move:
     ; vypocitaj adresu undo zaznamu
     lea r14, [undo_stack]
     mov r13, [undo_sp]
+    cmp r13, 64*16
+    jb .undo_space_ok
+    ; fail-fast: ochrana proti prepisu pamate za undo_stack
+    mov rax, SYS_EXIT
+    mov rdi, 70
+    syscall
+.undo_space_ok:
     lea r12, [r14 + r13]
 
     ; uloz from, to, flags
@@ -348,6 +430,13 @@ unmake_move:
 
     ; posun sa na posledny undo zaznam
     mov r13, [undo_sp]
+    cmp r13, 16
+    jae .undo_has_entry
+    ; fail-fast: underflow undo zasobnika
+    mov rax, SYS_EXIT
+    mov rdi, 71
+    syscall
+.undo_has_entry:
     sub r13, 16
     mov [undo_sp], r13
     lea r14, [undo_stack]
@@ -577,6 +666,9 @@ quiescence:
 
     ; --- TT PROBE v qsearch ---
     ; depth = 0 marker pre qsearch entries; aj move_only je vzorny
+%if ENABLE_TT = 0
+    jmp .qs_no_tt_hit
+%endif
     mov rdi, [position_hash]
     xor esi, esi            ; depth = 0 (qsearch marker)
     mov rdx, [rbp - 16]
@@ -770,6 +862,9 @@ quiescence:
     jne .qs_check_promo
 
     ; delta pruning pre en-passant (zisk pesiaka + rezerva)
+%if ENABLE_QDELTA = 0
+    jmp .qs_tactical
+%endif
     mov r11d, dword [rbp - 32]
     add r11d, 150
     cmp r11d, dword [rbp - 16]
@@ -793,6 +888,9 @@ quiescence:
     jz .qs_next
 
     ; delta pruning pre beznu branu figurku
+%if ENABLE_QDELTA = 0
+    jmp .qs_tactical
+%endif
     mov r10d, edx
     and r10d, PIECE_MASK
     lea r11, [q_capture_value]
@@ -872,6 +970,9 @@ quiescence:
 
 .qs_store_tt:
     ; Store do TT (depth=0 pre qsearch, flag = EXACT/LOWER/UPPER)
+%if ENABLE_TT = 0
+    jmp .qs_exit
+%endif
     mov ecx, TT_EXACT
     cmp eax, dword [rbp - 24]
     jge .qs_tt_lower
@@ -1058,6 +1159,20 @@ negamax:
     xor r14d, r14d          ; tt_move = 0
 
     ; TT probe: rdi=hash, rsi=depth, rdx=alpha, rcx=beta
+%if ENABLE_TT = 0
+    jmp .tt_probe_done
+%endif
+    ; diagnostika: pri cielenom trace d4e5 vetvy nechceme TT skore-cutoff,
+    ; potrebujeme vidiet realny priebeh reply slucky
+    cmp byte [trace_root_target], 1
+    jne .tt_probe_go
+    cmp qword [search_ply], 0
+    jne .tt_probe_go
+    movzx eax, byte [side]
+    cmp eax, WHITE
+    jne .tt_probe_go
+    jmp .tt_probe_done
+.tt_probe_go:
     mov rdi, [position_hash]
     mov rsi, [rbp - 8]
     mov rdx, [rbp - 16]
@@ -1395,6 +1510,9 @@ negamax:
     mov eax, dword [search_ply] ; -MATE + ply: rychlejsi mat = lepsie
     sub eax, MATE_SCORE
     ; store matu do TT (EXACT, tah 0): r12 je volny
+%if ENABLE_TT = 0
+    jmp .mate_no_tt_store
+%endif
     mov r12d, eax
     mov rdi, [position_hash]
     mov rsi, [rbp - 8]
@@ -1402,16 +1520,21 @@ negamax:
     xor ecx, ecx
     xor r8d, r8d
     call tt_store
+ .mate_no_tt_store:
     mov eax, r12d
     jmp .neg_exit
 .stalemate:
     ; store patu do TT (EXACT 0)
+%if ENABLE_TT = 0
+    jmp .stalemate_no_tt_store
+%endif
     mov rdi, [position_hash]
     mov rsi, [rbp - 8]
     xor edx, edx
     xor ecx, ecx
     xor r8d, r8d
     call tt_store
+.stalemate_no_tt_store:
     xor eax, eax
     jmp .neg_exit
 
@@ -1597,6 +1720,58 @@ negamax:
     mov rbx, -INF           ; best
     xor r13d, r13d          ; best move
     xor rcx, rcx            ; index
+
+    ; cieleny trace White uzla po d4e5 na ply=1
+    mov byte [trace_white_active], 0
+    cmp byte [trace_white_enable], 0
+    je .trace_node_init_done
+    cmp qword [search_ply], 0
+    jne .trace_node_init_done
+    movzx eax, byte [side]
+    cmp eax, WHITE
+    jne .trace_node_init_done
+    cmp byte [trace_root_target], 1
+    jne .trace_node_init_done
+    mov byte [trace_white_active], 1
+
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+
+    lea rdi, [trace_w_init_prefix]
+    call write_cstr
+    mov rax, rbx
+    call trace_print_signed
+    lea rdi, [trace_w_alpha_init]
+    call write_cstr
+    movsxd rax, dword [rbp - 16]
+    call trace_print_signed
+    lea rdi, [trace_w_stm]
+    call write_cstr
+    movzx rax, byte [side]
+    call print_number
+    lea rdi, [trace_w_fen]
+    call write_cstr
+    call uci_emit_fen
+    call trace_nl
+
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+
+.trace_node_init_done:
+
+    ; forced-init diagnostika: explicitne znovu nastav klucovy uzlovy stav
+    ; (korektny negamax: bez efektu; rozbita init cesta: moze zmenit vysledok)
+    mov rbx, -INF
+    xor r13d, r13d
+    mov rax, [rbp - 16]
+    mov [rbp - 16], rax
+    mov dword [rbp - 76], 0
 
 .move_loop:
     cmp rcx, r15
@@ -1971,6 +2146,81 @@ negamax:
 .depth_ready:
     mov [rbp - 52], rdi     ; child depth (pre PVS/LMR re-search)
 
+    ; uloz aktualne okno pre trace daneho reply tahu
+    mov eax, dword [rbp - 16]
+    mov [trace_move_alpha], eax
+    mov eax, dword [rbp - 24]
+    mov [trace_move_beta], eax
+
+    cmp byte [trace_white_active], 1
+    jne .trace_reply_preamble_done
+    ; info string wtrace reply move=<move> alpha=<a> beta=<b> stm=<stm> fen=<fen> eval_search=<eval> score=<...>
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    push rcx
+    push rdi
+    push rsi
+    push rdx
+    push r8
+    push r9
+    push r10
+
+    lea rdi, [trace_w_reply_prefix]
+    call write_cstr
+    movzx rax, word [rbp - 584 + rcx*2]
+    call uci_print_move_token
+
+    lea rdi, [trace_w_alpha]
+    call write_cstr
+    movsxd rax, dword [trace_move_alpha]
+    call trace_print_signed
+
+    lea rdi, [trace_w_beta]
+    call write_cstr
+    movsxd rax, dword [trace_move_beta]
+    call trace_print_signed
+
+    lea rdi, [trace_w_stm]
+    call write_cstr
+    movzx rax, byte [side]
+    call print_number
+
+    lea rdi, [trace_w_fen]
+    call write_cstr
+    call uci_emit_fen
+
+    lea rdi, [trace_w_eval]
+    call write_cstr
+    call evaluate
+    mov r10d, eax
+    movzx eax, byte [side]
+    cmp eax, WHITE
+    je .trace_reply_eval_ready
+    neg r10d
+.trace_reply_eval_ready:
+    movsxd rax, r10d
+    call trace_print_signed
+
+    lea rdi, [trace_w_score]
+    call write_cstr
+
+    pop r10
+    pop r9
+    pop r8
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rcx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+.trace_reply_preamble_done:
+
     test rcx, rcx
     jnz .pvs_window
 
@@ -2070,6 +2320,59 @@ negamax:
     pop rcx
     ; rcx je uz obnoven (nikdy sa neupravil v .after_search ceste bez pop)
     inc dword [rbp - 76]
+
+    cmp byte [trace_white_active], 1
+    jne .trace_reply_done
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+
+    mov r10d, eax
+    movsxd rax, r10d
+    call trace_print_signed
+
+    lea rdi, [trace_w_flag]
+    call write_cstr
+    mov edx, dword [trace_move_alpha]
+    cmp r10d, edx
+    jle .trace_flag_fl
+    mov edx, dword [trace_move_beta]
+    cmp r10d, edx
+    jge .trace_flag_fh
+    lea rdi, [trace_w_flag_exact]
+    jmp .trace_flag_emit
+.trace_flag_fl:
+    lea rdi, [trace_w_flag_fl]
+    jmp .trace_flag_emit
+.trace_flag_fh:
+    lea rdi, [trace_w_flag_fh]
+.trace_flag_emit:
+    call write_cstr
+    call trace_nl
+
+    mov eax, r10d
+    pop r10
+    pop r9
+    pop r8
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+.trace_reply_done:
 
     cmp eax, ebx
     jle .alpha_update
@@ -2377,11 +2680,45 @@ negamax:
 
     mov eax, ebx
 
+    cmp byte [trace_white_active], 1
+    jne .trace_final_done
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    push rdi
+    push r10
+    mov r10d, eax
+
+    lea rdi, [trace_w_final_prefix]
+    call write_cstr
+    mov rax, rbx
+    call trace_print_signed
+    lea rdi, [trace_w_returned]
+    call write_cstr
+    movsxd rax, r10d
+    call trace_print_signed
+    call trace_nl
+
+    mov eax, r10d
+    pop r10
+    pop rdi
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+.trace_final_done:
+
     ; pri aborte (uci_stop_flag) neukladaj do TT
     cmp byte [uci_stop_flag], 0
     jne .neg_exit
 
     ; store do TT: rdi=hash, rsi=depth, edx=score, ecx=flag, r8w=move
+%if ENABLE_TT = 0
+    jmp .neg_exit
+%endif
     cmp ebx, dword [rbp - 32]   ; best <= original_alpha -> UPPER
     jle .tt_upper
     cmp ebx, dword [rbp - 24]   ; best >= beta -> LOWER
@@ -2502,6 +2839,7 @@ search_best_move:
     mov r13, -INF           ; best score
     xor r14d, r14d          ; best move
     mov dword [root_trace_count], 0
+    mov dword [root_diag_count], 0
     xor rcx, rcx
     ; aspiration: ak nepoziadane, pouzi plne okno
     cmp dword [asp_use], 0
@@ -2691,6 +3029,15 @@ search_best_move:
 .root_sel_picked:
 
     movzx rax, word [rsp + rcx*2]
+    mov byte [trace_root_target], 0
+    cmp byte [trace_white_enable], 0
+    je .root_trace_target_done
+    cmp eax, 2331                 ; d4e5
+    jne .root_trace_target_done
+    mov byte [trace_root_target], 1
+.root_trace_target_done:
+    mov r9, [nodes_searched]
+    mov [root_diag_nodes_start], r9
     push rcx
     call make_move
     mov rcx, [rsp]          ; obnov index
@@ -2705,8 +3052,17 @@ search_best_move:
     dec rsi                 ; -(alpha+1)
     movsxd rdx, dword [root_alpha]
     neg rdx                 ; -alpha
+    mov eax, [root_alpha]
+    mov [root_diag_a_tmp], eax
+    mov eax, [root_alpha]
+    inc eax
+    mov [root_diag_b_tmp], eax
     jmp .root_call
 .root_full:
+    mov eax, [asp_alpha]
+    mov [root_diag_a_tmp], eax
+    mov eax, [asp_beta]
+    mov [root_diag_b_tmp], eax
     movsxd rsi, dword [asp_beta]
     neg rsi                 ; -beta
     movsxd rdx, dword [asp_alpha]
@@ -2726,6 +3082,10 @@ search_best_move:
     jge .root_searched
     mov rdi, r15
     dec rdi
+    mov eax, [asp_alpha]
+    mov [root_diag_a_tmp], eax
+    mov eax, [asp_beta]
+    mov [root_diag_b_tmp], eax
     movsxd rsi, dword [asp_beta]
     neg rsi
     movsxd rdx, dword [asp_alpha]
@@ -2737,10 +3097,48 @@ search_best_move:
     neg eax
 .root_searched:
     call unmake_move
+    mov byte [trace_root_target], 0
     pop rcx                 ; index pushnuty pred make_move
 
     cmp byte [uci_stop_flag], 0
     jne .loop_done
+
+    ; detailny root log: score, okno, fail flag, nodes, child pv0
+    mov edx, [root_diag_count]
+    cmp edx, 256
+    jae .root_diag_done
+
+    mov bx, word [rsp + rcx*2]
+    mov [root_diag_moves + rdx*2], bx
+    mov [root_diag_scores + rdx*4], eax
+    mov esi, [root_diag_a_tmp]
+    mov [root_diag_alpha + rdx*4], esi
+    mov esi, [root_diag_b_tmp]
+    mov [root_diag_beta + rdx*4], esi
+
+    mov esi, eax
+    mov edi, [root_diag_a_tmp]
+    cmp esi, edi
+    jle .root_diag_fl
+    mov edi, [root_diag_b_tmp]
+    cmp esi, edi
+    jge .root_diag_fh
+    mov byte [root_diag_flag + rdx], 0
+    jmp .root_diag_flag_done
+.root_diag_fl:
+    mov byte [root_diag_flag + rdx], 1
+    jmp .root_diag_flag_done
+.root_diag_fh:
+    mov byte [root_diag_flag + rdx], 2
+.root_diag_flag_done:
+
+    mov r8, [nodes_searched]
+    sub r8, [root_diag_nodes_start]
+    mov [root_diag_nodes + rdx*8], r8
+    mov bx, word [pv_table]
+    mov [root_diag_pv0 + rdx*2], bx
+    inc dword [root_diag_count]
+.root_diag_done:
 
     ; diagnostika: udrzuj top 5 root tahov podla skore zostupne
     movzx r8d, word [rsp + rcx*2]
