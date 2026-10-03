@@ -514,8 +514,13 @@ evaluate:
     and r13d, COLOR_MASK    ; farba (0 alebo BLACK=8)
 
     ; --- MG/EG hodnota ---
-    cmp byte [eval_mode], 0
-    jne .nnue_lookup
+    ; phase-1 own/enemy PST lookup ma zmysel len pre eval_mode 1 (trenovane
+    ; STM-relativne tabulky z net.nnue). eval_mode 2 sem vstupuje len cez
+    ; low-confidence fallback a ten ma byt classic eval — pri default tabulkach
+    ; z pst_init (own == enemy) STM-relativny mirror prehodil PST prispevky
+    ; medzi farbami pre cierneho STM (P0: EM2 hlbka 2+ v otvarani).
+    cmp byte [eval_mode], 1
+    je .nnue_lookup
     ; classic: mirror podla absolutnej farby, jedna tabulka na typ
     lea rdi, [material_mg]
     mov eax, dword [rdi + r14*4]
