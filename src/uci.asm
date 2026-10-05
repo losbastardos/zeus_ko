@@ -1725,6 +1725,11 @@ uci_emit_fen:
     add al, '0'
     call uci_write_char
     xor r14d, r14d
+    ; syscall v uci_write_char znici rcx - znovu nacitaj figurku z board
+    mov eax, r12d
+    shl eax, 3
+    add eax, r13d
+    movzx ecx, byte [r15 + rax]
 .emit_piece:
     call uci_piece_to_fen_char
     call uci_write_char
