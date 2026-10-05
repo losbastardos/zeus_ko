@@ -1,3 +1,4 @@
+|S0|
 ; ============================================================
 ; Copyright (c) 2026 Marek Suchy <marek.suchy@gmail.com>
 ; Vsetky prava vyhradene / All rights reserved.
@@ -206,6 +207,8 @@ pv_char_buf:  resb 1
 uci_log_move_buf: resb 8 ; "e2e4" / "e7e8q" pre log
 input_pend:     resb 512  ; nevybavený vstup z pollu počas searchu (oddelený od move_buf!)
 input_pend_len: resq 1
+|E0|
+|S1|
 uci_quit_flag:  resb 1    ; 'quit' prišlo počas searchu -> exit hneď po bestmove
 uci_pgn_ply:    resq 1    ; počet ťahov zaznamenaných do PGN v aktuálnej partii
 uci_pgn_idx:    resq 1    ; index ťahu v práve spracúvanom 'position ... moves'
@@ -245,6 +248,7 @@ global uci_loop, write_cstr, search_poll_input, uci_now_ms
 extern init_board, init_hash_history, record_hash, clear_history
 extern pgn_san_begin, pgn_write_move, pgn_new_game, pgn_quit
 extern generate_all_moves, find_move, apply_move, update_position_state, compute_hash
+extern perft
 extern search_best_move, book_lookup, print_move, square_to_str, print_number
 extern tt_init
 extern parse_fen_string, parse_int, config_get
@@ -517,7 +521,8 @@ uci_parse_move:
     ja .error
     shl rax, 3
     add rbx, rax
-
+|E1|
+|S2|
     movzx rax, byte [move_buf + rdi + 2]
     sub rax, 'a'
     cmp rax, 7
@@ -970,6 +975,8 @@ uci_setoption:
     jle .hash_max_ok
     mov eax, 1024
 .hash_max_ok:
+|E2|
+|S3|
     mov [uci_hash_size], eax
     mov edi, eax
     call tt_init
@@ -1350,6 +1357,8 @@ search_poll_input:
     dec r13
 .dispatch:
     ; case-sensitive porovnanie prikazov
+|E3|
+|S4|
     ; Neznamy prikaz NESMIE byt zahodeny - nechame ho v input_pend
     ; pre uci_loop (inak by pipelined 'position'/'go' pocas searchu
     ; zmizli a GUI by cakalo na bestmove naveky).
@@ -1763,6 +1772,8 @@ uci_emit_fen:
     test ebx, ebx
     jnz .castle_emit
     mov al, '-'
+|E4|
+|S5|
     call uci_write_char
     jmp .ep_part
 .castle_emit:
@@ -2187,7 +2198,8 @@ uci_go:
     call uci_str_eq
     test rax, rax
     jnz .set_ponder
-
+|E5|
+|S6|
     mov rdi, r14
     jmp .go_loop
 
@@ -2580,6 +2592,8 @@ uci_go:
     and rax, 0x3F
     call square_to_str
     mov ax, [square_str_buf]
+|E6|
+|S7|
     mov [uci_log_move_buf + 2], ax
     mov r13d, 4                 ; r13 uz je mrtvy (best move je v r12)
     mov rax, r12
@@ -2992,6 +3006,14 @@ uci_loop:
     test rax, rax
     jnz .nnuewalk
 
+    ; 'perft' (non-standard helper: perft N na aktualnej pozicii)
+    mov rdi, r12
+    mov rsi, rbx
+    lea rdx, [rel .str_perft]
+    call uci_str_eq
+    test rax, rax
+    jnz .perft
+
     ; neznamy prikaz - vypiseme len ak nie je prazdny
     lea rdi, [uci_unknown]
     call write_cstr
@@ -3006,6 +3028,36 @@ uci_loop:
 .list:
     call generate_all_moves
     call print_move_list
+    jmp .loop
+
+.perft:
+|E7|
+|S8|
+    ; perft N - N je token za slovom "perft" (offset 5; ws sa preskoci)
+    mov rdi, 5
+    call uci_token
+    cmp rax, -1
+    je .perft_default
+    mov rdi, rax
+    mov rsi, rbx
+    call uci_parse_int
+    test rax, rax
+    jg .perft_cap
+.perft_default:
+    mov eax, 1
+.perft_cap:
+    cmp rax, 10
+    jle .perft_run
+    mov eax, 10
+.perft_run:
+    mov rdi, rax
+    call perft
+    call print_number
+    mov rax, SYS_WRITE
+    mov rdi, STDOUT
+    mov rsi, msg_newline
+    mov rdx, 1
+    syscall
     jmp .loop
 
 .eval:
@@ -3354,6 +3406,8 @@ uci_loop:
     lea rdi, [uci_info_nnuewalk_move]
     call write_cstr
     movzx rax, word [uci_nnuewalk_move]
+|E8|
+|S9|
     call uci_print_move_token
 
     lea rdi, [uci_info_nnuewalk_type]
@@ -3608,7 +3662,7 @@ uci_loop:
     call print_number
     lea rdi, [uci_tbtest_wdl_p4_tbsize]
     call write_cstr
-    mov rax, [tb_wdl_debug_tb_size]
+    mov rax, [tb_wdl_debug_p4_tb_size]
     call print_number
     lea rdi, [uci_tbtest_wdl_p4_tbsize]
     call write_cstr
@@ -3711,6 +3765,8 @@ uci_loop:
     call print_number
     lea rdi, [uci_tbtest_dtz_flags1]
     call write_cstr
+|E9|
+|S10|
     mov eax, [tb_dtz_debug_flags1]
     movsxd rax, eax
     call print_number
@@ -3721,7 +3777,7 @@ uci_loop:
     call print_number
     lea rdi, [uci_tbtest_dtz_tbsize]
     call write_cstr
-    mov eax, [tb_dtz_debug_tb_size]
+    mov rax, [tb_dtz_debug_tb_size]
     movsxd rax, eax
     call print_number
     lea rdi, [uci_tbtest_dtz_ptr_wdl_i]
@@ -3881,3 +3937,4 @@ uci_loop:
 .str_hashtest: db "hashtest", 0
 .str_nnuewalk: db "nnuewalk", 0
 .str_rootdiag: db "rootdiag", 0
+.str_perft:   db "perft", 0|E10|
