@@ -25,6 +25,7 @@ extern msg_newline
 extern square_str_buf, num_buf
 extern lang_txt_prompt_move, lang_txt_prompt_invalid_input
 extern write_cstr
+extern pgn_quit
 
 ; ============================================================
 ; print_title
@@ -112,7 +113,16 @@ read_move:
     mov rdx, 1
     syscall
     cmp rax, 1
-    jne .got_line
+    je .have_char
+    ; EOF/chyba na zaciatku riadku (r12==0): stdin je zatvoreny - ciste ukonci
+    ; proces (inak by game loop na EOF slucke spaloval CPU donekonecna)
+    test r12, r12
+    jnz .got_line
+    call pgn_quit
+    mov rax, SYS_EXIT
+    xor edi, edi
+    syscall
+.have_char:
 
     movzx rbx, byte [move_buf + r12]
     cmp rbx, 10
