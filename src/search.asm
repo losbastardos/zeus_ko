@@ -1085,7 +1085,7 @@ negamax:
     mov rax, [rbp - 16]
     cmp rax, [rbp - 24]
     jl .mdp_ok
-    jmp .neg_exit                   ; alpha >= beta: uz nemoze byt lepsi mat
+    jmp .neg_exit                    ; alpha >= beta: uz nemoze byt lepsi mat
 .mdp_ok:
 
     ; in_check flag pre cely uzol (null move, LMR, extension)
@@ -2470,10 +2470,10 @@ negamax:
     movzx edi, ax
     and edi, 0x3F
     shl edi, 6
-    mov ebx, eax
-    shr ebx, 6
-    and ebx, 0x3F
-    add edi, ebx
+    mov r10d, eax
+    shr r10d, 6
+    and r10d, 0x3F
+    add edi, r10d
     add edi, r9d
     lea r9, [history]
     mov esi, dword [r9 + rdi*4]
@@ -3562,4 +3562,3 @@ book_pick_move:
     pop r12
     pop rbx
     ret
-
