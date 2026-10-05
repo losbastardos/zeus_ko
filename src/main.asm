@@ -304,7 +304,16 @@ menu_read_line:
     mov rdx, 1
     syscall
     cmp rax, 1
-    jne .done
+    je .have_char
+    ; EOF/chyba na zaciatku riadku (r12==0): stdin je zatvoreny - ciste ukonci
+    ; proces (inak by menu na EOF slucke spalovalo CPU donekonecna)
+    test r12, r12
+    jnz .done
+    call pgn_quit
+    mov rax, SYS_EXIT
+    xor edi, edi
+    syscall
+.have_char:
     movzx rbx, byte [move_buf + r12]
     cmp rbx, 10
     je .done
