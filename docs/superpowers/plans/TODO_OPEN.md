@@ -48,8 +48,14 @@ Poznamka: hotove body su odmazane, pokracujeme v TODO.
 - [ ] **P2-AKTIVNE: NNUE `EvalMode=2` diagnostika po failed bullet smoke**
   - signal: SPRT smoke vs classic (`tc=1+0.01`) skoncil `H0 accepted` uz po 68 zapocitanych hrach,
     score `0-65-3` pre NNUE, `Elo -658.7` (log: `scratch/sprt_bullet_nnue2_vs_classic0_20261006.log`)
-  - ciel: potvrdit spravny init/load siete, accumulator update, scaling a fallback vetvy
-  - validacia: rychly replay 50-100 hier bez kolapsu + potom mini-SPRT (`elo0=0 elo1=8`)
+  - krok 1 (hotovo): scale/korelacny audit pred hrami
+    - dataset: `400` pozicii (`arasan2026 + STS1 + silent-but-deadly`)
+    - vysledok: `median |eval2|/|eval0| = 0.4122`, `pearson=0.6966`, `spearman=0.8130`,
+      rozsah classic `[-1081,533]` vs NNUE `[-339,360]`
+    - artefakty: `scratch/evalmode_scale_audit_20261006.tsv` + `.txt`
+  - krok 2 (aktivne): konzistencia accumulatora v search ceste (incremental make/unmake vs reference)
+    - ciel: najst prvy mismatch ply a typ tahu (capture/promo/en-passant/castle)
+  - krok 3 (az po kroku 1+2): 50-100 hier debug run s root eval trace + mini-SPRT (`elo0=0 elo1=8`)
 - [ ] **P2-AKTIVNE: Bitboard movegen/apply inkrementalne**
   - ciel: prejst generate_legal/apply na bitboard reprezentaciu, ciel +30-50 % nps
   - validacia: `perft 4/5` = 197281/4865609, strength-gate

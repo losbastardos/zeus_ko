@@ -344,3 +344,24 @@ SESSION_LOG_ARCHIVE_20261002.md.
 - V aktualnej konfiguracii je `EvalMode=2` neschopny konkurovat `EvalMode=0` ani v bullet smoke.
 - Pred dalsim NNUE SPRT je potrebna technicka diagnostika rezimu `EvalMode=2`
   (init/load siete, feature update, scaling, fallback cesty).
+
+### Delta update 13 (2026-10-06, scale/correlation audit pred dalsimi hrami)
+
+- Spusteny lacny audit nad `400` poziciami (`200 arasan + 100 STS1 + 100 SBD`), depth-1,
+  `OwnBook=false`, porovnanie `EvalMode=0` vs `EvalMode=2`.
+- Sumar metrik:
+  - `sign_agree_rate = 0.9821` (219/223 nenulovych parov)
+  - `pearson = 0.6966`
+  - `spearman = 0.8130`
+  - `median |eval2|/|eval0| = 0.4122`
+  - rozsah classic: `[-1081, 533]`
+  - rozsah NNUE: `[-339, 360]`
+- Doplnenie:
+  - sign mismatch iba `4` pozicie,
+  - no vela pripadov ma velky rozdiel amplitudy (casto `eval2 = 0` pri silno negativnom classic score).
+- Interpretacia:
+  - nejde primarne o nahodny sum; signal je konzistentny so silnou kompresiou/skalovacim problemom
+    v `EvalMode=2` ceste, co vie rozbit pruning kalibraciu pod casom.
+- Artefakty auditu:
+  - `scratch/evalmode_scale_audit_20261006.tsv`
+  - `scratch/evalmode_scale_audit_20261006.txt`
