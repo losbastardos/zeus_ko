@@ -365,3 +365,20 @@ SESSION_LOG_ARCHIVE_20261002.md.
 - Artefakty auditu:
   - `scratch/evalmode_scale_audit_20261006.tsv`
   - `scratch/evalmode_scale_audit_20261006.txt`
+
+### Delta update 14 (2026-10-06, linear scale trial + smoke verdict)
+
+- Bol otestovany rychly linear post-scale experiment pre `EvalMode=2`
+  (fit faktor z LS auditu, kratka inference korekcia v evaluate).
+- Re-audit po patchi ukazal len ciastocny posun rozsahu, ale horsiu zhodu:
+  - `median |eval2|/|eval0| = 0.4572`
+  - `range mode2 = [-713, 582]`
+  - `pearson = 0.5355`, `spearman = 0.6737`, `sign_agree_rate = 0.8981`
+  - artefakty: `scratch/evalmode_scale_audit_20261006_postscale.tsv` + `.txt`
+- Následny bullet SPRT smoke (`tc=1+0.01`) stale skoncil okamzitym killom:
+  - score (NNUE_SCALED vs CLASSIC): `0-55-5` (60 zapocitanych)
+  - `Elo difference: -544.7 +/- 217.3`
+  - `SPRT llr -2.96` -> `H0 was accepted`
+  - log: `scratch/sprt_bullet_nnue2_scaled_vs_classic0_20261006.log`
+- Verdikt: samotny linear scale fix nevysvetluje/protiopatruje kolaps pod casom.
+- Experiment bol po overeni rollbacknuty (zmena sa neudrzala v aktivej vetve).

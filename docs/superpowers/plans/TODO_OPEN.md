@@ -53,7 +53,11 @@ Poznamka: hotove body su odmazane, pokracujeme v TODO.
     - vysledok: `median |eval2|/|eval0| = 0.4122`, `pearson=0.6966`, `spearman=0.8130`,
       rozsah classic `[-1081,533]` vs NNUE `[-339,360]`
     - artefakty: `scratch/evalmode_scale_audit_20261006.tsv` + `.txt`
-  - krok 2 (aktivne): konzistencia accumulatora v search ceste (incremental make/unmake vs reference)
+  - krok 1b (hotovo, zamietnute): rychly linear post-scale trial + smoke
+    - patch vyskusany a rollbacknuty po negativnom vysledku
+    - smoke: `0-55-5`, `Elo -544.7`, `SPRT H0 accepted`
+    - artefakt: `scratch/sprt_bullet_nnue2_scaled_vs_classic0_20261006.log`
+  - krok 2 (AKTIVNE, priorita): konzistencia accumulatora v search ceste (incremental make/unmake vs reference)
     - ciel: najst prvy mismatch ply a typ tahu (capture/promo/en-passant/castle)
   - krok 3 (az po kroku 1+2): 50-100 hier debug run s root eval trace + mini-SPRT (`elo0=0 elo1=8`)
 - [ ] **P2-AKTIVNE: Bitboard movegen/apply inkrementalne**
