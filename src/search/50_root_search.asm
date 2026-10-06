@@ -54,6 +54,9 @@ search_best_move:
     rep stosd
     ; nova pozicia/go: reset root ordering hintu z predch. iteracie
     mov dword [root_best_move], 0
+    mov word [root_prev_top_moves + 0], 0
+    mov word [root_prev_top_moves + 2], 0
+    mov word [root_prev_top_moves + 4], 0
 .skip_history_clear:
 
     call generate_all_moves
@@ -252,7 +255,23 @@ search_best_move:
     cmp ax, word [root_best_move]
     jne .root_score_cmp
     add edx, 1000000
+
+    ; ordering-only hint: top-3 root tahy z predchadzajucej iteracie
 .root_score_cmp:
+    cmp ax, [root_prev_top_moves + 0]
+    jne .root_prev2_cmp
+    add edx, 250000
+    jmp .root_score_cmp_done
+.root_prev2_cmp:
+    cmp ax, [root_prev_top_moves + 2]
+    jne .root_prev3_cmp
+    add edx, 180000
+    jmp .root_score_cmp_done
+.root_prev3_cmp:
+    cmp ax, [root_prev_top_moves + 4]
+    jne .root_score_cmp_done
+    add edx, 120000
+.root_score_cmp_done:
     cmp edx, r11d
     jle .root_sel_next
     mov r11d, edx
@@ -584,6 +603,25 @@ search_best_move:
 
 .have_best:
     mov dword [root_best_move], r14d   ; pre ordering v dalsej ID iteracii
+
+    ; uloz top-3 z aktualnej iteracie pre ordering-only hint
+    mov word [root_prev_top_moves + 0], 0
+    mov word [root_prev_top_moves + 2], 0
+    mov word [root_prev_top_moves + 4], 0
+    mov eax, [root_trace_count]
+    test eax, eax
+    jz .root_prev_done
+    mov ax, [root_trace_moves + 0]
+    mov [root_prev_top_moves + 0], ax
+    cmp dword [root_trace_count], 1
+    jle .root_prev_done
+    mov ax, [root_trace_moves + 2]
+    mov [root_prev_top_moves + 2], ax
+    cmp dword [root_trace_count], 2
+    jle .root_prev_done
+    mov ax, [root_trace_moves + 4]
+    mov [root_prev_top_moves + 4], ax
+.root_prev_done:
 
     mov dword [search_last_score], r13d
     mov edi, r14d
