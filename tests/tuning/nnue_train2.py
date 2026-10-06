@@ -8,7 +8,9 @@ Features (STM-relative, HalfKP-lite):
 
 Net: eval_cp = W2 . CReLU(W1^T x + b1) + b2
   CReLU(z) = clip(z, 0, 255) - quantization-friendly ReLU
-Training: logistic on game result, eval_cp/scale as logit; L2.
+Training:
+    --target result: logistic on game result, eval_cp/scale as logit; L2.
+    --target cp: MSE na eval_cp (STM-perspective), vhodne pre cp-label retrain; L2.
 Export net.nnue v2:
   magic "NNUE" u32, version u32 = 2
   H u32, shift1 u32 (log2 of W1 output scale), shift2 u32
@@ -65,6 +67,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=20260917)
     p.add_argument("--report", default="tests/reports/nnue_train2.txt")
     p.add_argument("--max-positions", type=int, default=0)
+    p.add_argument("--target", choices=["result", "cp"], default="result",
+                   help="result=logloss na game result, cp=MSE na eval_cp")
+    p.add_argument("--cp-clip", type=float, default=2000.0,
+                   help="clip cieloveho eval_cp pri --target cp (0=bez clipu)")
     return p.parse_args()
 
 
@@ -85,23 +91,39 @@ def build_features(board: chess.Board) -> np.ndarray:
     return x
 
 
-def load_rows(paths, max_pos: int):
+def load_rows(paths, max_pos: int, target: str, cp_clip: float):
     rows = []
     for path in paths:
         with open(path, "r", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 try:
                     fen = r["fen"]
-                    res = float(r["result"])
                 except Exception:
                     continue
-                # Label v Texel CSV je z pohladu BIELEHO (1.0 = vyhra bieleho),
-                # ale build_features koduje farby relativne voci strane na tahu.
-                # Pre pozicie, kde taha cierny, treba label preklopit, inac sa
-                # trenuje na protichodnom signali a siet sa nenauci nic.
-                if fen.split()[1] == "b":
-                    res = 1.0 - res
-                rows.append((fen, res))
+                stm_black = fen.split()[1] == "b"
+                if target == "cp":
+                    try:
+                        val = float(r["eval_cp"])
+                    except Exception:
+                        continue
+                    # eval_cp v CSV je bezne z pohladu bieleho; trenujeme STM-relativne,
+                    # preto pre cierneho na tahu invertujeme znamienko.
+                    if stm_black:
+                        val = -val
+                    if cp_clip > 0:
+                        val = max(-cp_clip, min(cp_clip, val))
+                    rows.append((fen, val))
+                else:
+                    try:
+                        val = float(r["result"])
+                    except Exception:
+                        continue
+                    # Label v Texel CSV je z pohladu BIELEHO (1.0 = vyhra bieleho),
+                    # ale build_features koduje farby relativne voci strane na tahu.
+                    # Pre pozicie, kde taha cierny, treba label preklopit.
+                    if stm_black:
+                        val = 1.0 - val
+                    rows.append((fen, val))
     if max_pos and len(rows) > max_pos:
         rows = rows[:max_pos]
     return rows
@@ -114,8 +136,11 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
     H = args.hidden
 
-    rows = load_rows(args.dataset, args.max_positions)
+    rows = load_rows(args.dataset, args.max_positions, args.target, args.cp_clip)
     n = len(rows)
+    if n == 0:
+        print("error: empty dataset after parsing/filtering", file=sys.stderr)
+        return 2
     print(f"dataset: {n} positions (H={H})", flush=True)
 
     X = np.empty((n, F), dtype=np.float32)
@@ -143,7 +168,7 @@ def main() -> int:
     step = 0
     for epoch in range(args.epochs):
         order = rng.permutation(n)
-        ll = 0.0
+        metric = 0.0
         for s in range(0, n, bs):
             idx = order[s:s + bs]
             xb = X[idx]
@@ -154,12 +179,17 @@ def main() -> int:
             z1 = xb @ W1 + b1                    # (m,H)
             h = np.clip(z1, 0.0, 255.0)          # inference clip [0,255]
             ev = h @ W2 + b2                     # (m,)
-            z = np.clip(ev / scale, -40, 40)
-            p = 1.0 / (1.0 + np.exp(-z))
-            p = np.clip(p, 1e-12, 1 - 1e-12)
-            ll += float(-(yb * np.log(p) + (1 - yb) * np.log(1 - p)).sum())
-            # backward
-            d = (p - yb) / scale                 # (m,)
+            if args.target == "cp":
+                # Priamy cp ciel: hladime eval v centipawnoch.
+                diff = ev - yb
+                metric += float((diff * diff).sum())
+                d = diff / (scale * scale)       # (m,)
+            else:
+                z = np.clip(ev / scale, -40, 40)
+                p = 1.0 / (1.0 + np.exp(-z))
+                p = np.clip(p, 1e-12, 1 - 1e-12)
+                metric += float(-(yb * np.log(p) + (1 - yb) * np.log(1 - p)).sum())
+                d = (p - yb) / scale             # (m,)
             dW2 = h.T @ d / m + args.l2 * W2
             db2 = float(d.sum() / m)
             dh = np.outer(d, W2)                 # (m,H)
@@ -179,9 +209,10 @@ def main() -> int:
             mb2 = b1m * mb2 + (1 - b1m) * db2
             vb2 = b2m * vb2 + (1 - b2m) * db2 * db2
             b2 -= args.lr * (mb2 / (1 - b1m ** step)) / (math.sqrt(vb2 / (1 - b2m ** step)) + eps)
-        ll /= n
+        metric /= n
         if epoch == 0 or (epoch + 1) % 5 == 0:
-            print(f"epoch {epoch+1}: logloss={ll:.5f}", flush=True)
+            name = "mse_cp" if args.target == "cp" else "logloss"
+            print(f"epoch {epoch+1}: {name}={metric:.5f}", flush=True)
 
     # Kvantizacia: jednotny fixed-point scaling S = 2^shift pre vahy aj biasy.
     # asm inference: acc = sum x*W1q + b1q ; h = clip(acc>>shift1, 0, 255)
@@ -214,7 +245,11 @@ def main() -> int:
 
     with open(args.report, "w", encoding="utf-8") as f:
         f.write(f"nnue_train2 H={H}\npositions={n}\nepochs={args.epochs}\n")
-        f.write(f"final_logloss={ll:.6f}\n")
+        f.write(f"target={args.target}\n")
+        if args.target == "cp":
+            f.write(f"final_mse_cp={metric:.6f}\n")
+        else:
+            f.write(f"final_logloss={metric:.6f}\n")
     print(f"report: {args.report}")
     return 0
 
