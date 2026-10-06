@@ -109,7 +109,6 @@ corr_history:   resd 2*1024     ; [side][hash&1023] eval correction (centipawns*
 move_stack:     resw 64         ; tah odohrany na danom ply (0 = null ply)
 eval_stack:     resd 64         ; static eval na kazdom ply (pre improving flag)
 root_best_move: resd 1          ; best move z predchadzajucej ID iteracie
-root_prev_top_moves:  resw 3    ; top-3 root tahy z predch. iteracie (ordering-only hint)
 null_stack:     resb 64*16      ; ulozene stavy pre null-move (side/ep/hash/halfmove)
 asp_alpha:      resd 1          ; aspiration window (root)
 asp_beta:       resd 1
