@@ -57,8 +57,13 @@ Poznamka: hotove body su odmazane, pokracujeme v TODO.
     - patch vyskusany a rollbacknuty po negativnom vysledku
     - smoke: `0-55-5`, `Elo -544.7`, `SPRT H0 accepted`
     - artefakt: `scratch/sprt_bullet_nnue2_scaled_vs_classic0_20261006.log`
-  - krok 2 (AKTIVNE, priorita): konzistencia accumulatora v search ceste (incremental make/unmake vs reference)
-    - ciel: najst prvy mismatch ply a typ tahu (capture/promo/en-passant/castle)
+  - krok 2 (hotovo, bez drift signalu): konzistencia accumulatora v legalnych pathoch
+    - random audit 500 vzoriek: `mismatches=0`, coverage `capture=66`, `ep=1`, `castle=1`
+    - cieleny special set (castle/ep/promo): `cases=5`, `mismatches=0`
+    - artefakty: `scratch/nnue_acc_path_audit_20261006.tsv` + `scratch/nnue_acc_special_moves_20261006.tsv`
+  - krok 2b (AKTIVNE, priorita): search-time diagnostika kolapsu EM2
+    - ciel: oddelit kalibraciu od heuristik interakcie (pruning/fallback/post-korekcie)
+    - minimalny plan: AB smoke s vypnutymi post-korekciami + porovnanie root eval trace
   - krok 3 (az po kroku 1+2): 50-100 hier debug run s root eval trace + mini-SPRT (`elo0=0 elo1=8`)
 - [ ] **P2-AKTIVNE: Bitboard movegen/apply inkrementalne**
   - ciel: prejst generate_legal/apply na bitboard reprezentaciu, ciel +30-50 % nps

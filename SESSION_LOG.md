@@ -382,3 +382,22 @@ SESSION_LOG_ARCHIVE_20261002.md.
   - log: `scratch/sprt_bullet_nnue2_scaled_vs_classic0_20261006.log`
 - Verdikt: samotny linear scale fix nevysvetluje/protiopatruje kolaps pod casom.
 - Experiment bol po overeni rollbacknuty (zmena sa neudrzala v aktivej vetve).
+
+### Delta update 15 (2026-10-06, accumulator path audit)
+
+- Krok 2 (incremental make/unmake konzistencia) bol preverený na legalnych sekvenciach.
+- Random path audit:
+  - `500` vzoriek cez `position startpos moves ...` + `evalstate`
+  - výsledok: `mismatches=0`, `first_mismatch=none`
+  - coverage: `captures=66`, `en-passant=1`, `castles=1`, `promotions=0`
+  - artefakty: `scratch/nnue_acc_path_audit_20261006.tsv` + `.txt`
+- Cielene special-move scenare:
+  - white/black castling, en-passant, promotion (Q/N)
+  - výsledok: `cases=5 mismatches=0`
+  - artefakt: `scratch/nnue_acc_special_moves_20261006.tsv`
+
+#### Interpretacia
+
+- Pri doteraz pokrytych cestach sa acc drift nepotvrdil.
+- Kolaps `EvalMode=2` pod časom teda pravdepodobne nie je trivialny bug v delta update,
+  ale skôr interakcia kalibracie/heuristik (pruning gates, post-korekcie, confidence fallback).
