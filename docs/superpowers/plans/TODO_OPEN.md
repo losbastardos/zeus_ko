@@ -45,6 +45,11 @@ Poznamka: hotove body su odmazane, pokracujeme v TODO.
 
 ## P2 — Vykon v searchi
 
+- [ ] **P2-AKTIVNE: NNUE `EvalMode=2` diagnostika po failed bullet smoke**
+  - signal: SPRT smoke vs classic (`tc=1+0.01`) skoncil `H0 accepted` uz po 68 zapocitanych hrach,
+    score `0-65-3` pre NNUE, `Elo -658.7` (log: `scratch/sprt_bullet_nnue2_vs_classic0_20261006.log`)
+  - ciel: potvrdit spravny init/load siete, accumulator update, scaling a fallback vetvy
+  - validacia: rychly replay 50-100 hier bez kolapsu + potom mini-SPRT (`elo0=0 elo1=8`)
 - [ ] **P2-AKTIVNE: Bitboard movegen/apply inkrementalne**
   - ciel: prejst generate_legal/apply na bitboard reprezentaciu, ciel +30-50 % nps
   - validacia: `perft 4/5` = 197281/4865609, strength-gate

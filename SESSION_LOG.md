@@ -312,3 +312,35 @@ SESSION_LOG_ARCHIVE_20261002.md.
 - Search zmeny sa odteraz posudzuju primarne cez SPRT.
 - Fixed-depth fingerprint je len lokalny diagnosticky signal search spravania,
   nie ship kritérium.
+
+### Delta update 11 (2026-10-06, Bullet/NNUE line open)
+
+- Spusteny prvy Bullet SPRT smoke na overenie NNUE signalu v rychlom TC.
+- Pairing: rovnaky binar `./chess-static`, rozdiel iba UCI option `EvalMode`:
+  - NEW: `EvalMode=2` (NNUE)
+  - BASE: `EvalMode=0` (classic)
+- Parametre behu:
+  - `tc=1+0.01`, `games=200`, `concurrency=2`, `Hash=64`, `Threads=1`
+  - `OwnBook=false` na oboch stranach
+  - openings: `utils/LumbrasGigaBase_OTB_1990-1999.pgn` (`random`, `plies=8`, `srand=20261006`)
+  - `SPRT: elo0=0 elo1=8 alpha=0.05 beta=0.05`
+- Artefakty:
+  - log: `scratch/sprt_bullet_nnue2_vs_classic0_20261006.log`
+  - pgn: `scratch/sprt_bullet_nnue2_vs_classic0_20261006.pgn`
+
+### Delta update 12 (2026-10-06, Bullet/NNUE smoke verdict)
+
+- Bullet smoke bol ukonceny pred limitom na SPRT hranici.
+- Final score (NNUE vs CLASSIC): `0 - 65 - 3` (`0.022`) po 68 zapocitanych hrach.
+- Cutechess sumár:
+  - `Elo difference: -658.7 +/- nan`
+  - `LOS: 0.0%`
+  - `DrawRatio: 4.4%`
+  - `SPRT: llr -2.95`, hranice `[-2.94, 2.94]` -> `H0 was accepted`
+- Poznamka k behu: jedna hra bola ukoncena ako `No result` pri zastaveni matche po dosiahnuti SPRT hranice.
+
+#### Interpretacia
+
+- V aktualnej konfiguracii je `EvalMode=2` neschopny konkurovat `EvalMode=0` ani v bullet smoke.
+- Pred dalsim NNUE SPRT je potrebna technicka diagnostika rezimu `EvalMode=2`
+  (init/load siete, feature update, scaling, fallback cesty).
