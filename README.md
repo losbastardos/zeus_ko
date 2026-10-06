@@ -23,6 +23,8 @@ Grafický SDL mód:
 - Rozšíriť a udržiavať test sady (regresia, suite, TB smoke/verify).
 - Udržiavať dokumentáciu a test postupy v súlade s aktuálnym stavom engina.
 
+NNUE diagnostika (2026-10-06) je uzavretá: sieť v `EvalMode=2` je nekvalitná v king-danger režime (konvergentný signál zo sond 4/4, PGN mate kolapsov a scale auditu), pričom rýchle search-side zásahy (post-scale, all-off, null-off, futility-off) nepriniesli praktické zlepšenie; ďalší krok je iba retrain s cp labelmi a väčšou kapacitou.
+
 ## Kompilácia
 
 ```bash
