@@ -59,6 +59,37 @@ V `chess.ini` môžeš nastaviť aj `syzygy=` na cestu k TB tabuľkám (prázdne
 V textovom móde sa vpravo od šachovnice zobrazuje panel s históriou ťahov,
 zajatými figúrkami a knižnými ťahmi pre aktuálnu pozíciu (ak sú v `book.book`).
 
+## Použitie v cutechess-cli
+
+Engine podporuje UCI, takže po builde ho vieš priamo použiť v cutechess-cli.
+
+- Ak máš `./chess`, funguje ako UCI engine, ale je dynamicky linkovaný (SDL knižnice musia byť dostupné).
+- Ak máš `./chess-static`, je to odporúčaný variant pre benchmarky, self-play a CI (plne statický textový build).
+
+Príklad rýchleho 2-engine zápasu (10+0.1, striedanie farieb):
+
+```bash
+cutechess-cli \
+	-engine name=zeusA cmd=./chess-static \
+	-engine name=zeusB cmd=./chess-static \
+	-each proto=uci tc=10+0.1 option.Threads=1 option.Hash=64 option.OwnBook=false \
+	-games 20 -repeat
+```
+
+Príklad s opening PGN:
+
+```bash
+cutechess-cli \
+	-engine name=zeusA cmd=./chess-static \
+	-engine name=zeusB cmd=./chess-static \
+	-each proto=uci tc=10+0.1 option.Threads=1 option.Hash=64 option.OwnBook=false \
+	-openings file=utils/LumbrasGigaBase_OTB_1990-1999.pgn format=pgn order=random \
+	-games 200 -repeat -pgnout scratch/cutechess_run.pgn
+```
+
+Poznámka:
+- Pre porovnávanie dvoch revízií je najistejší postup pripraviť dve binárky s rôznym názvom (napr. `scratch/chess-baseline` a `scratch/chess-candidate`) a tie priamo použiť v `cmd=`.
+
 ## Reprezentácia
 
 - `board[64]` – index `0 = a1`, `63 = h8`
