@@ -64,6 +64,13 @@ Poznamka: hotove body su odmazane, pokracujeme v TODO.
   - krok 2b (AKTIVNE, priorita): search-time diagnostika kolapsu EM2
     - ciel: oddelit kalibraciu od heuristik interakcie (pruning/fallback/post-korekcie)
     - minimalny plan: AB smoke s vypnutymi post-korekciami + porovnanie root eval trace
+  - krok 2b (hotovo): order-check root trace + all-off ablacia
+    - izolovany order-check (`0->2->target` vs `2->0->target`) neukazal contamination (`0/50` oba mody)
+    - all-off smoke (EM2 bez post-korekcii/fallback): stale `H0 accepted`, score `0-73-2`
+    - zaver: post-korekcie nie su hlavny vinnik kolapsu
+  - krok 2c (AKTIVNE, priorita): pruning kalibracia pre EM2
+    - ciel: overit interakciu EM2 s pruning thresholds (null/futility/razor/probcut/LMR)
+    - plan: mini matica selective-off heuristik + root trace diffs na STS profile
   - krok 3 (az po kroku 1+2): 50-100 hier debug run s root eval trace + mini-SPRT (`elo0=0 elo1=8`)
 - [ ] **P2-AKTIVNE: Bitboard movegen/apply inkrementalne**
   - ciel: prejst generate_legal/apply na bitboard reprezentaciu, ciel +30-50 % nps

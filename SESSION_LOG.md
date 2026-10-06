@@ -401,3 +401,22 @@ SESSION_LOG_ARCHIVE_20261002.md.
 - Pri doteraz pokrytych cestach sa acc drift nepotvrdil.
 - Kolaps `EvalMode=2` pod časom teda pravdepodobne nie je trivialny bug v delta update,
   ale skôr interakcia kalibracie/heuristik (pruning gates, post-korekcie, confidence fallback).
+
+### Delta update 16 (2026-10-06, root-trace order check + all-off ablacia)
+
+- Root-trace order check (bez TT warm confoundu):
+  - protokol: v jednom procese iba prepnutie poradia `setoption EvalMode` a nasledne jediny `go depth 10`
+    (A: `0->2->target`, B: `2->0->target`), 50 FEN.
+  - vysledok contamination: `order_sensitive_mode0=0/50`, `order_sensitive_mode2=0/50`
+  - artefakt: `scratch/root_trace_ordercheck_isolated_20261006.tsv`
+- Struktura rozdielov EM0 vs EM2 (z clean trace):
+  - `same_top1=25/50`, `same_bestmove=26/50`, `median_abs_top1_cp_delta=26`
+  - fit `y=a*x+b` (EM2 vs EM0 top1 cp): `a=0.621`, `b=17.3`, `corr=0.774`
+  - najvacsia divergencia na STS profile (`same_top1=4/15`, `same_best=5/15`)
+- All-off ablacia (vypnute EM2 post-korekcie + fallback), bullet SPRT smoke:
+  - score: `0-73-2` (75 zapocitanych), `Elo -747.7`, `SPRT llr -2.96`, `H0 accepted`
+  - artefakt: `scratch/sprt_bullet_nnue2_alloff_vs_classic0_20261006.log`
+- Verdikt:
+  - podla pravidla sa all-off nepohol z mrtveho pasma; post-korekcie nie su hlavny vinnik.
+  - priorita sa presuva na pruning kalibraciu / search-time interakcie EM2.
+  - docasna all-off zmena bola rollbacknuta, aktivna vetva ostala bez experimentu.
