@@ -280,7 +280,7 @@ key_eval_mode:
     db "eval_mode", 0
 
 default_eval_mode:
-    db "2", 0
+    db "0", 0
 
 key_nnue_file:
     db "nnue_file", 0
